@@ -28,18 +28,31 @@ def main() -> None:
         "--width-min-ratio",
         type=float,
         default=0.9,
-        help=(
-            "Minimum accepted boundary-pair distance, as a ratio of the "
-            "detected stroke width. Default: 0.9."
-        ),
     )
     parser.add_argument(
         "--width-max-ratio",
         type=float,
         default=1.1,
+    )
+    parser.add_argument(
+        "--attach-gap-ratio",
+        type=float,
+        default=1.0,
         help=(
-            "Maximum accepted boundary-pair distance, as a ratio of the "
-            "detected stroke width. Default: 1.1."
+            "Maximum distance, as a ratio of the detected stroke width, over "
+            "which a dangling line end is extended onto another line it runs "
+            "straight into (closes T-junctions, e.g. a crossbar meeting a "
+            "stem). Default: 1.0."
+        ),
+    )
+    parser.add_argument(
+        "--attach-angle",
+        type=float,
+        default=60.0,
+        help=(
+            "Maximum angle, in degrees, between a dangling line end's "
+            "outward direction and the line it's being attached to. "
+            "Default: 60.0."
         ),
     )
     args = parser.parse_args()
@@ -55,6 +68,8 @@ def main() -> None:
                 out_dir,
                 width_min_ratio=args.width_min_ratio,
                 width_max_ratio=args.width_max_ratio,
+                attach_gap_ratio=args.attach_gap_ratio,
+                attach_angle_deg=args.attach_angle,
             )
     else:
         process_image(
@@ -62,4 +77,6 @@ def main() -> None:
             args.output,
             width_min_ratio=args.width_min_ratio,
             width_max_ratio=args.width_max_ratio,
+            attach_gap_ratio=args.attach_gap_ratio,
+            attach_angle_deg=args.attach_angle,
         )

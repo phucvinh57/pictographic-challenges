@@ -26,6 +26,8 @@ def process_image(
     output_dir: Path,
     width_min_ratio: float = 0.9,
     width_max_ratio: float = 1.1,
+    attach_gap_ratio: float = 1.0,
+    attach_angle_deg: float = 60.0,
 ) -> tuple[Path, Path, Path, Path, Path]:
     gray = cv2.imread(str(input_path), cv2.IMREAD_GRAYSCALE)
     if gray is None:
@@ -36,7 +38,13 @@ def process_image(
     midpoints, stroke_width = find_centerline_points(
         binary, width_min_ratio=width_min_ratio, width_max_ratio=width_max_ratio
     )
-    svg, vector_paths = vectorize_midpoints(midpoints, gray.shape, stroke_width)
+    svg, vector_paths = vectorize_midpoints(
+        midpoints,
+        gray.shape,
+        stroke_width,
+        attach_gap_ratio=attach_gap_ratio,
+        attach_angle_deg=attach_angle_deg,
+    )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     stem = input_path.stem

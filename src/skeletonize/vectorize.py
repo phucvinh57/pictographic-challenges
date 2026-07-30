@@ -121,13 +121,62 @@ def prune_spurs(
 
 
 def _outward_direction(
-    path: list[PixelPoint], at_start: bool, span: int
+    path: list[PixelPoint] | list[Point], at_start: bool, span: int
 ) -> np.ndarray:
     pts = np.asarray(path, dtype=np.float64)
     span = min(span, len(pts) - 1) or 1
     vec = (pts[0] - pts[span]) if at_start else (pts[-1] - pts[-1 - span])
     norm = np.linalg.norm(vec)
     return vec / norm if norm > 0 else vec
+
+
+def _endpoint_counts(
+    paths: list[list[Point] | None] | list[list[Point]],
+) -> dict[Point, int]:
+    """Count, per point, how many surviving non-closed paths terminate
+    there. Shared by `connect_opposite_lines` and `connect_ends_to_lines` so
+    both work off current line counts rather than the raw skeleton's
+    (potentially stale, see `connect_opposite_lines`) degree."""
+    counts: dict[Point, int] = {}
+    for path in paths:
+        if path is None or path[0] == path[-1]:
+            continue
+        counts[path[0]] = counts.get(path[0], 0) + 1
+        counts[path[-1]] = counts.get(path[-1], 0) + 1
+    return counts
+
+
+def _project_to_polyline(
+    point: np.ndarray, path: list[Point]
+) -> tuple[float, np.ndarray]:
+    """Closest point on a polyline to `point`, as (distance, foot)."""
+    pts = np.asarray(path, dtype=np.float64)
+    starts = pts[:-1]
+    ends = pts[1:]
+    seg = ends - starts
+    seg_len_sq = np.sum(seg * seg, axis=1)
+    safe_len_sq = np.where(seg_len_sq > 0, seg_len_sq, 1.0)
+    t = np.clip(np.sum((point - starts) * seg, axis=1) / safe_len_sq, 0.0, 1.0)
+    feet = starts + seg * t[:, None]
+    dists = np.linalg.norm(feet - point, axis=1)
+    best = int(np.argmin(dists))
+    return float(dists[best]), feet[best]
+
+
+def _densify(start: np.ndarray, end: np.ndarray, step: float = 1.0) -> list[Point]:
+    """Points from just after `start` up to and including `end`, spaced
+    ~`step` apart, so a bridged gap has the same point density as the
+    1px-spaced skeleton it's joining (otherwise the sparse long jump distorts
+    the later Catmull-Rom fit)."""
+    dist = float(np.linalg.norm(end - start))
+    if dist <= step:
+        return [(float(end[0]), float(end[1]))]
+    n = max(1, round(dist / step))
+    return [
+        (float(start[0] + (end[0] - start[0]) * i / n),
+         float(start[1] + (end[1] - start[1]) * i / n))
+        for i in range(1, n + 1)
+    ]
 
 
 def connect_opposite_lines(
@@ -147,16 +196,11 @@ def connect_opposite_lines(
     degree) like part of a multi-way junction; recomputing per-point line
     counts from the current lines is what lets that lone edge be treated as
     dangling and get reconnected."""
-    paths: list[list[PixelPoint] | None] = [list(line) for line in lines]
+    paths: list[list[Point] | None] = [list(line) for line in lines]
     cos_tolerance = np.cos(np.radians(angle_tolerance_deg))
 
     while True:
-        endpoint_counts: dict[PixelPoint, int] = {}
-        for path in paths:
-            if path is None or path[0] == path[-1]:
-                continue
-            endpoint_counts[path[0]] = endpoint_counts.get(path[0], 0) + 1
-            endpoint_counts[path[-1]] = endpoint_counts.get(path[-1], 0) + 1
+        endpoint_counts = _endpoint_counts(paths)
 
         ends: list[tuple[int, bool, np.ndarray, np.ndarray]] = []
         for idx, path in enumerate(paths):
@@ -209,12 +253,80 @@ def connect_opposite_lines(
             path_a = path_a[::-1]
         if not start_b:
             path_b = path_b[::-1]
-        paths[idx_a] = path_a + path_b
+        bridge = _densify(
+            np.asarray(path_a[-1], dtype=np.float64),
+            np.asarray(path_b[0], dtype=np.float64),
+        )
+        paths[idx_a] = path_a + bridge[:-1] + path_b
         paths[idx_b] = None
 
     return [
         [(float(x), float(y)) for x, y in path] for path in paths if path is not None
     ]
+
+
+def connect_ends_to_lines(
+    lines: list[list[Point]],
+    max_gap: float,
+    angle_tolerance_deg: float = 60.0,
+    tangent_span: int = 4,
+) -> list[list[Point]]:
+    """Extend a dangling line end onto another line when it runs straight
+    into it, closing T-junctions that `connect_opposite_lines` can't: the
+    crossbar of an "H" stops short of the stem's centerline (the stem
+    passes straight through, so it never has a dangling end there to weld
+    to), and needs to reach across to the point on the stem it's actually
+    pointing at instead. Runs after `connect_opposite_lines` so genuine
+    head-on continuations are merged first and aren't mistaken for
+    T-attachments."""
+    paths = [list(line) for line in lines]
+    endpoint_counts = _endpoint_counts(paths)
+    cos_tolerance = np.cos(np.radians(angle_tolerance_deg))
+    eps = 1e-6
+
+    ends: list[tuple[int, bool, np.ndarray, np.ndarray]] = []
+    for idx, path in enumerate(paths):
+        if path[0] == path[-1]:
+            continue
+        if endpoint_counts[path[0]] == 1:
+            ends.append(
+                (idx, True, np.asarray(path[0], dtype=np.float64),
+                 _outward_direction(path, True, tangent_span))
+            )
+        if endpoint_counts[path[-1]] == 1:
+            ends.append(
+                (idx, False, np.asarray(path[-1], dtype=np.float64),
+                 _outward_direction(path, False, tangent_span))
+            )
+
+    extensions: dict[tuple[int, bool], list[Point]] = {}
+    for idx, is_start, point, direction in ends:
+        best: tuple[float, np.ndarray] | None = None
+        for other_idx, other_path in enumerate(paths):
+            if other_idx == idx:
+                continue
+            dist, foot = _project_to_polyline(point, other_path)
+            if dist <= eps or dist > max_gap:
+                continue
+            unit = (foot - point) / dist
+            if np.dot(direction, unit) < cos_tolerance:
+                continue
+            if best is None or dist < best[0]:
+                best = (dist, foot)
+        if best is not None:
+            extensions[(idx, is_start)] = _densify(point, best[1])
+
+    result = []
+    for idx, path in enumerate(paths):
+        new_path = list(path)
+        start_ext = extensions.get((idx, True))
+        if start_ext:
+            new_path = list(reversed(start_ext)) + new_path
+        end_ext = extensions.get((idx, False))
+        if end_ext:
+            new_path = new_path + end_ext
+        result.append(new_path)
+    return result
 
 
 def simplify_polyline(points: list[Point], epsilon: float = 1.5) -> list[Point]:
@@ -313,12 +425,15 @@ def vectorize_midpoints(
     junction_gap_ratio: float = 0.08,
     connect_gap_ratio: float = 2.0,
     angle_tolerance_deg: float = 40.0,
+    attach_gap_ratio: float = 1.0,
+    attach_angle_deg: float = 60.0,
     simplify_epsilon: float = 1.5,
 ) -> tuple[str, list[list[Point]]]:
     """Turn the raw centerline midpoints into a smooth SVG: rasterize +
     thin into a 1px skeleton, drop thinning spurs, bridge gaps between
-    opposing dangling ends, then fit a Catmull-Rom vector curve of the given
-    stroke width through each resulting line."""
+    opposing dangling ends, extend remaining dangling ends onto any line
+    they run straight into (closing T-junctions), then fit a Catmull-Rom
+    vector curve of the given stroke width through each resulting line."""
     if not midpoints or not stroke_width:
         height, width = shape
         return build_svg([], width, height, stroke_width or 0.0), []
@@ -336,6 +451,11 @@ def vectorize_midpoints(
         lines,
         max_gap=stroke_width * connect_gap_ratio,
         angle_tolerance_deg=angle_tolerance_deg,
+    )
+    connected = connect_ends_to_lines(
+        connected,
+        max_gap=stroke_width * attach_gap_ratio,
+        angle_tolerance_deg=attach_angle_deg,
     )
 
     svg_paths = []
