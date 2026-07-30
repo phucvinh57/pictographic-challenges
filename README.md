@@ -1,21 +1,24 @@
 # pictographic
 
-Binarizes images, thins them down to a 1px skeleton using the Zhang-Suen
-algorithm (via OpenCV's `cv2.ximgproc.thinning`), then vectorizes that
-skeleton's centerline into an SVG drawn with a single fixed stroke width.
+Binarizes images, then estimates each stroke's centerline directly from the
+ink's boundary contours — no skeletonization (medial axis / thinning) step
+involved. The stroke width is auto-detected from the ink's distance
+transform. For each boundary point, the local tangent gives a perpendicular
+line pointing into the ink; among nearby boundary points lying roughly along
+that line, with a midpoint that is a genuine narrowest crossing of the
+stroke (not a graze past a corner or junction), the one whose distance is
+closest to the stroke width is treated as the point directly across the
+stroke, and the midpoint of the pair approximates a centerline point.
 
-For each input image, three outputs are produced:
+For each input image, the following outputs are produced:
 
 - `<name>-binarize.png` — Otsu-thresholded black & white image
-- `<name>-ZhangSuen-skeletonize.png` — thinned skeleton of the binary image
-- `<name>-ZhangSuen.svg` — the skeleton's centerline traced into polylines
-  and rendered as SVG `<path>` elements with a fixed `stroke-width`
-
-Vectorizing walks the skeleton's foreground pixels as a graph: endpoints and
-branch points become path breaks, straight runs get simplified with
-Ramer-Douglas-Peucker, and short spurious branches left by thinning (a known
-Zhang-Suen artifact, worst on near-45-degree strokes) are pruned using a
-threshold derived from the image's own ink thickness.
+- `<name>-canny-edges.png` — Canny edge detection on the original grayscale
+  image (traces the outline of each stroke)
+- `<name>-edges-midpoints-overlay.png` — the Canny edges (red) and the
+  collected centerline midpoints (blue dots) drawn into a single image, so
+  the midpoints' position inside the stroke's outline can be checked at a
+  glance
 
 ## Install
 
@@ -39,35 +42,38 @@ that for you.
 
 ## Run
 
-Process every image under `input/challenge_2` and write results to
-`output/challenge_2` (this is the default when no arguments are given):
+Process every image under `input/skeletonize` and write results to
+`output/skeletonize` (this is the default when no arguments are given):
 
 ```bash
-uv run challenge_2
+uv run skeletonize
 ```
 
 Process a single file, output going to a chosen directory:
 
 ```bash
-uv run challenge_2 input/challenge_2/letter_K.png output/challenge_2
+uv run skeletonize input/skeletonize/letter_K.png output/skeletonize
 ```
 
 Process a different directory into another directory:
 
 ```bash
-uv run challenge_2 input/challenge_1 output/challenge_1
+uv run skeletonize input/challenge_1 output/challenge_1
 ```
 
-Override the fixed stroke width used for the vectorized SVG (default `45`):
+The ink stroke width is auto-detected per image from its distance transform,
+so no manual tuning is needed. A boundary-point pair is only kept if its
+distance falls within `--width-min-ratio`/`--width-max-ratio` of that
+detected width (default `0.9`/`1.1`, i.e. within ±10%):
 
 ```bash
-uv run challenge_2 input/challenge_2 output/challenge_2 --stroke-width 20
+uv run skeletonize input/skeletonize output/skeletonize --width-min-ratio 0.85 --width-max-ratio 1.15
 ```
 
 You can also run the module directly without the installed script name:
 
 ```bash
-uv run python -m challenge_2
+uv run python -m skeletonize
 ```
 
 ## Managing the project
@@ -115,10 +121,10 @@ uv run python
 pyproject.toml              project metadata & dependencies (edit by hand or via `uv add`/`uv remove`)
 uv.lock                      locked dependency versions (committed, don't edit by hand)
 .python-version              pinned Python version for uv
-src/challenge_2/
+src/skeletonize/
   __init__.py                CLI entry point (argument parsing, directory walking)
-  skeletonize.py              binarize() and thin_zhang_suen() implementations
-  vectorize.py                 skeleton -> polylines -> SVG (spur pruning, RDP simplification)
+  skeletonize.py              binarize(), detect_edges(), and process_image() orchestration
+  centerline.py                contour extraction + perpendicular-matching centerline estimation
 input/                        source images, organized by challenge
-output/                       generated binarize/skeletonize/SVG results
+output/                       generated binarize/edges/overlay results
 ```
