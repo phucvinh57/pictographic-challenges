@@ -19,6 +19,11 @@ For each input image, the following outputs are produced:
   collected centerline midpoints (blue dots) drawn into a single image, so
   the midpoints' position inside the stroke's outline can be checked at a
   glance
+- `<name>-vector-skeleton-overlay.png` — the Canny edges (red) and the final
+  smoothed vector paths (green) after thinning, gap-bridging, and curve
+  fitting
+- `<name>.svg` — the vectorized result: each stroke as a smooth SVG path,
+  stroked at the estimated stroke width with round caps/joins
 
 ## Install
 
@@ -125,6 +130,7 @@ src/skeletonize/
   __init__.py                CLI entry point (argument parsing, directory walking)
   skeletonize.py              binarize(), detect_edges(), and process_image() orchestration
   centerline.py                contour extraction + perpendicular-matching centerline estimation
+  vectorize.py                 thin/trace/reconnect midpoints, then fit + render an SVG
 input/                        source images, organized by challenge
 output/                       generated binarize/edges/overlay results
 ```

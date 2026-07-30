@@ -56,11 +56,37 @@ boundary contours:
      if it moved by more than ~2%.
    - The midpoints of the surviving pairs are the estimated centerline
      points.
-4. `skeletonize.py::process_image` orchestrates the above per image, writing
-   `<stem>-binarize.png`, `<stem>-canny-edges.png`, and
-   `<stem>-edges-midpoints-overlay.png` (edges + midpoints composited via
-   `centerline.py::overlay_edges_midpoints`) into the output directory.
-5. `__init__.py::main` is the CLI entry point: parses `input`/`output`
+4. `vectorize.py::vectorize_midpoints` turns the raw midpoint cloud into a
+   smooth SVG, entirely raster-side (the *only* place this codebase actually
+   thins pixels):
+   - `rasterize_midpoints` draws each midpoint as a small filled circle into
+     a blank mask, so adjacent midpoints fuse into a solid blob per stroke.
+   - `thin_mask` (`cv2.ximgproc.thinning`, Guo-Hall) reduces that blob to a
+     1px-wide skeleton — this is what smooths the raw midpoints' pixel-level
+     jaggedness.
+   - `trace_skeleton` walks the skeleton's 8-connected pixel graph into
+     ordered point chains between endpoints/junctions (or all the way around,
+     for a closed loop with no junction).
+   - `prune_spurs` drops two kinds of thinning artifacts: short dangling
+     branches hanging off a junction, and the tiny sliver edges connecting
+     the handful of pixels a single wide junction gets fragmented into.
+   - `connect_opposite_lines` bridges dangling ends that face each other
+     head-on (close together, outward tangents pointing at one another) —
+     this reconnects strokes broken by a gap in the centerline midpoints
+     (e.g. near a corner/junction, where `find_centerline_points` may have
+     rejected candidates as ungenuine grazes).
+   - `simplify_polyline` (`cv2.approxPolyDP`) thins out redundant points
+     before `_catmull_rom_bezier_segments` fits a smooth cubic-Bezier vector
+     curve through what's left; `build_svg` renders each as an SVG
+     `<path>` with the estimated `stroke_width`, `fill="none"`, and round
+     caps/joins (round caps are also what visually seals any small gap that
+     `connect_opposite_lines` didn't bridge).
+5. `skeletonize.py::process_image` orchestrates the above per image, writing
+   `<stem>-binarize.png`, `<stem>-canny-edges.png`,
+   `<stem>-edges-midpoints-overlay.png`, `<stem>-vector-skeleton-overlay.png`
+   (edges + final vector paths, via `vectorize.py::overlay_vector_paths`),
+   and `<stem>.svg` into the output directory.
+6. `__init__.py::main` is the CLI entry point: parses `input`/`output`
    (positional, defaulting to `input/skeletonize` / `output/skeletonize`), and
    either processes a single file or recurses over a directory of images
    (`.png`, `.jpg`, `.jpeg`, `.bmp`, `.tif`, `.tiff`).
