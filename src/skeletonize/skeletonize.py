@@ -5,8 +5,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from .centerline import find_centerline_points, overlay_edges_midpoints
-from .vectorize import overlay_vector_paths, vectorize_midpoints
+from .medial_axis import extract_medial_axis
 
 
 def binarize(gray: np.ndarray) -> np.ndarray:
@@ -14,50 +13,27 @@ def binarize(gray: np.ndarray) -> np.ndarray:
     return binary
 
 
-def detect_edges(
-    gray: np.ndarray, low_threshold: float = 50.0, high_threshold: float = 150.0
+def overlay_edges_axis(
+    gray: np.ndarray,
+    axis: np.ndarray,
+    edge_color: tuple[int, int, int] = (0, 0, 255),
+    axis_color: tuple[int, int, int] = (0, 255, 0),
 ) -> np.ndarray:
-    edges = cv2.Canny(gray, low_threshold, high_threshold)
-    return cv2.bitwise_not(edges)
+    edges = cv2.Canny(gray, 50.0, 150.0)
+    canvas = np.full((*gray.shape, 3), 255, dtype=np.uint8)
+    canvas[edges > 0] = edge_color
+    canvas[axis < 128] = axis_color
+    return canvas
 
-
-def process_image(
-    input_path: Path,
-    output_dir: Path,
-    width_min_ratio: float = 0.9,
-    width_max_ratio: float = 1.1,
-    attach_gap_ratio: float = 1.0,
-    attach_angle_deg: float = 60.0,
-) -> tuple[Path, Path, Path, Path, Path]:
+def process_image(input_path: Path, output_dir: Path):
     gray = cv2.imread(str(input_path), cv2.IMREAD_GRAYSCALE)
     if gray is None:
         raise ValueError(f"Could not read image: {input_path}")
 
     binary = binarize(gray)
-    edges = detect_edges(gray)
-    midpoints, stroke_width = find_centerline_points(
-        binary, width_min_ratio=width_min_ratio, width_max_ratio=width_max_ratio
-    )
-    svg, vector_paths = vectorize_midpoints(
-        midpoints,
-        gray.shape,
-        stroke_width,
-        attach_gap_ratio=attach_gap_ratio,
-        attach_angle_deg=attach_angle_deg,
-    )
-
+    axis = extract_medial_axis(binary)
     output_dir.mkdir(parents=True, exist_ok=True)
     stem = input_path.stem
-    binary_path = output_dir / f"{stem}-binarize.png"
-    edges_path = output_dir / f"{stem}-canny-edges.png"
-    overlay_path = output_dir / f"{stem}-edges-midpoints-overlay.png"
-    vector_overlay_path = output_dir / f"{stem}-vector-skeleton-overlay.png"
-    svg_path = output_dir / f"{stem}.svg"
+    overlay_path = output_dir / f"{stem}-edges-medial-axis-overlay.png"
 
-    cv2.imwrite(str(binary_path), binary)
-    cv2.imwrite(str(edges_path), edges)
-    cv2.imwrite(str(overlay_path), overlay_edges_midpoints(edges, midpoints))
-    cv2.imwrite(str(vector_overlay_path), overlay_vector_paths(edges, vector_paths))
-    svg_path.write_text(svg)
-
-    return binary_path, edges_path, overlay_path, vector_overlay_path, svg_path
+    cv2.imwrite(str(overlay_path), overlay_edges_axis(gray, axis))

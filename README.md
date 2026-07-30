@@ -1,29 +1,14 @@
 # pictographic
 
-Binarizes images, then estimates each stroke's centerline directly from the
-ink's boundary contours — no skeletonization (medial axis / thinning) step
-involved. The stroke width is auto-detected from the ink's distance
-transform. For each boundary point, the local tangent gives a perpendicular
-line pointing into the ink; among nearby boundary points lying roughly along
-that line, with a midpoint that is a genuine narrowest crossing of the
-stroke (not a graze past a corner or junction), the one whose distance is
-closest to the stroke width is treated as the point directly across the
-stroke, and the midpoint of the pair approximates a centerline point.
+Binarizes images and extracts each drawing's medial axis from the original
+ink mask.
 
 For each input image, the following outputs are produced:
 
 - `<name>-binarize.png` — Otsu-thresholded black & white image
-- `<name>-canny-edges.png` — Canny edge detection on the original grayscale
-  image (traces the outline of each stroke)
-- `<name>-edges-midpoints-overlay.png` — the Canny edges (red) and the
-  collected centerline midpoints (blue dots) drawn into a single image, so
-  the midpoints' position inside the stroke's outline can be checked at a
-  glance
-- `<name>-vector-skeleton-overlay.png` — the Canny edges (red) and the final
-  smoothed vector paths (green) after thinning, gap-bridging, and curve
-  fitting
-- `<name>.svg` — the vectorized result: each stroke as a smooth SVG path,
-  stroked at the estimated stroke width with round caps/joins
+- `<name>-medial-axis.png` — one-pixel medial axis of the original ink
+- `<name>-edges-medial-axis-overlay.png` — Canny edges (red) with the medial
+  axis overlaid in green
 
 ## Install
 
@@ -64,15 +49,6 @@ Process a different directory into another directory:
 
 ```bash
 uv run skeletonize input/challenge_1 output/challenge_1
-```
-
-The ink stroke width is auto-detected per image from its distance transform,
-so no manual tuning is needed. A boundary-point pair is only kept if its
-distance falls within `--width-min-ratio`/`--width-max-ratio` of that
-detected width (default `0.9`/`1.1`, i.e. within ±10%):
-
-```bash
-uv run skeletonize input/skeletonize output/skeletonize --width-min-ratio 0.85 --width-max-ratio 1.15
 ```
 
 You can also run the module directly without the installed script name:
@@ -128,9 +104,8 @@ uv.lock                      locked dependency versions (committed, don't edit b
 .python-version              pinned Python version for uv
 src/skeletonize/
   __init__.py                CLI entry point (argument parsing, directory walking)
-  skeletonize.py              binarize(), detect_edges(), and process_image() orchestration
-  centerline.py                contour extraction + perpendicular-matching centerline estimation
-  vectorize.py                 thin/trace/reconnect midpoints, then fit + render an SVG
+  skeletonize.py              binarize() and process_image() orchestration
+  medial_axis.py               original-ink medial-axis extraction
 input/                        source images, organized by challenge
 output/                       generated binarize/edges/overlay results
 ```
