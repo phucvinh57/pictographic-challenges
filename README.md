@@ -6,9 +6,18 @@ ink mask.
 For each input image, the following outputs are produced:
 
 - `<name>-binarize.png` — Otsu-thresholded black & white image
-- `<name>-medial-axis.png` — one-pixel medial axis of the original ink
+- `<name>-skeleton.png` — one-pixel medial axis of the original ink
+- `<name>-skeleton-cut-intersections.png` — skeleton with every intersection's
+  maximal-inscribed circle removed
+- `<name>-sharpened.png` — the medial axis after each junction is refilled by
+  pairing the branches that continue into each other, then extending every
+  remaining branch until it cuts that through-stroke
+- `<name>-sharpened-overlay.png` — the rounded medial axis (red) overlaid with
+  the sharpened geometry (green)
 - `<name>-edges-medial-axis-overlay.png` — Canny edges (red) with the medial
   axis overlaid in green
+- `<name>.svg` — the sharpened medial-axis paths rendered at the stroke width
+  estimated from the ink's distance transform
 
 ## Install
 
@@ -90,6 +99,18 @@ Run an ad-hoc command inside the project's environment:
 uv run <command>
 ```
 
+Lint the project:
+
+```bash
+uv run ruff check .
+```
+
+Type-check the project with the same engine used by VS Code's Pylance:
+
+```bash
+uv run pyright
+```
+
 Open a Python shell inside the environment:
 
 ```bash
@@ -105,7 +126,10 @@ uv.lock                      locked dependency versions (committed, don't edit b
 src/skeletonize/
   __init__.py                CLI entry point (argument parsing, directory walking)
   skeletonize.py              binarize() and process_image() orchestration
-  medial_axis.py               original-ink medial-axis extraction
+  medial_axis.py              distance-ordered medial-axis thinning and width estimation
+  graph.py                    graph construction and intersection removal
+  sharpen.py                  junction line-fitting and vertex sharpening
+  vectorize.py                medial-axis tracing and SVG rendering
 input/                        source images, organized by challenge
-output/                       generated binarize/edges/overlay results
+output/                       generated raster diagnostics and SVG results
 ```

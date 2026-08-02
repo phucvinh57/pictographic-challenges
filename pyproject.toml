@@ -9,7 +9,6 @@ requires-python = ">=3.14"
 dependencies = [
     "numpy>=2.5.1",
     "opencv-contrib-python>=5.0.0.93",
-    "scikit-image>=0.26.0",
     "scipy>=1.18.0",
 ]
 
@@ -22,3 +21,9 @@ build-backend = "uv_build"
 
 [tool.uv.build-backend]
 module-name = "skeletonize"
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.411",
+    "ruff>=0.16.1",
+]
