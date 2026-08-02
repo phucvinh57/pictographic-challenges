@@ -113,17 +113,3 @@ def extract_medial_axis(binary: np.ndarray) -> np.ndarray:
 
     axis, _ = _medial_axis_mask(image < 128)
     return np.where(axis, 0, 255).astype(np.uint8)
-
-
-def estimate_stroke_width(binary: np.ndarray, axis: np.ndarray) -> float:
-    """Estimate the original ink width from radii sampled along its medial axis."""
-    image = np.asarray(binary)
-    skeleton = np.asarray(axis)
-    if image.ndim != 2 or skeleton.ndim != 2:
-        raise ValueError("The binary image and medial axis must be two-dimensional")
-    if image.shape != skeleton.shape:
-        raise ValueError("The binary image and medial axis must have the same shape")
-
-    distance = cast(np.ndarray, distance_transform_edt(image < 128))
-    radii = distance[skeleton < 128]
-    return float(2.0 * np.median(radii)) if radii.size else 0.0

@@ -21,6 +21,23 @@ def main() -> None:
         type=Path,
         default=Path("output/skeletonize"),
     )
+    parser.add_argument(
+        "--sample-spacing",
+        type=float,
+        default=20.0,
+        metavar="PIXELS",
+        help="arc-length spacing between axis samples (default: 10)",
+    )
+    parser.add_argument(
+        "--cut-radius-scale",
+        type=float,
+        default=1.0,
+        metavar="SCALE",
+        help=(
+            "multiplier on each intersection's maximal-inscribed radius when "
+            "cutting it out (default: 1.0)"
+        ),
+    )
     args = parser.parse_args()
 
     if args.input.is_dir():
@@ -29,6 +46,10 @@ def main() -> None:
                 continue
             relative_dir = image_path.parent.relative_to(args.input)
             out_dir = args.output / relative_dir
-            process_image(image_path, out_dir)
+            process_image(
+                image_path, out_dir, args.sample_spacing, args.cut_radius_scale
+            )
     else:
-        process_image(args.input, args.output)
+        process_image(
+            args.input, args.output, args.sample_spacing, args.cut_radius_scale
+        )
