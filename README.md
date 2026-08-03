@@ -55,6 +55,13 @@ it, and falls back to its maximal-inscribed circle where a branch has no
 transition point; corners are cut between the pair of transition points that
 bound them.
 
+Where two strokes leave one shared cap, as in the middle of a `3`, the axis of
+their overlap hangs off the intersection as a branch of its own. It is not a
+stroke anyone drew — stroking it lays a flat bar over what the drawing flares
+into a wedge — so it is recognised by its disc staying swollen for its whole
+length, and unfolded back into the two stroke centre lines it was the average
+of.
+
 The curves are stroked at the ink's own width, twice the median
 maximal-inscribed radius of the axis. Override it with `--stroke-width`:
 

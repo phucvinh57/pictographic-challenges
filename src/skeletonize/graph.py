@@ -3,11 +3,13 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from itertools import combinations, pairwise
-from math import hypot
+from math import cos, hypot, radians
 from typing import TypedDict, cast
 
 import numpy as np
 from scipy.ndimage import distance_transform_edt
+
+from .medial_axis import OverlapSpur
 
 PixelPoint = tuple[int, int]
 AxisPoint = tuple[float, float]
@@ -55,12 +57,19 @@ class SkeletonIntersection:
 
 @dataclass(frozen=True)
 class AxisCut:
-    """A bend of the axis removed so the strokes around it are left straight."""
+    """A bend of the axis removed so the strokes around it are left straight.
+
+    A cut that swallowed an overlap spur already knows where its strokes meet
+    and how they run into it, so it carries the spur's tip as ``focus`` and its
+    unfolded ``rails`` instead of leaving both to be crossed out of tangents.
+    """
 
     center: PixelPoint
     radius: float
     pixels: frozenset[PixelPoint]
     junction: bool
+    focus: AxisPoint | None = None
+    rails: tuple[tuple[AxisPoint, ...], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -78,6 +87,7 @@ class IntersectionTangents:
     tangents: tuple[EdgeTangent, ...]
     crossings: tuple[AxisPoint, ...]
     focus: AxisPoint | None
+    rails: tuple[tuple[AxisPoint, ...], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -85,6 +95,7 @@ class SampledGraph:
     points: tuple[AxisPoint, ...]
     segments: tuple[tuple[int, int], ...]
     foci: tuple[int, ...]
+    junctions: tuple[int, ...]
 
 
 @dataclass(frozen=True)
@@ -138,6 +149,40 @@ class SkeletonGraph:
         }
 
 
+def _resample_polyline(
+    points: Sequence[AxisPoint], spacing: float
+) -> tuple[AxisPoint, ...]:
+    """Walk a polyline at an even arc length, keeping both of its ends."""
+    if len(points) < 2:
+        return tuple(points)
+
+    segments = [
+        (start, end, hypot(end[0] - start[0], end[1] - start[1]))
+        for start, end in pairwise(points)
+    ]
+    if sum(length for _, _, length in segments) == 0:
+        return (points[0],)
+
+    walked = [points[0]]
+    target = spacing
+    traversed = 0.0
+    for start, end, length in segments:
+        while target < traversed + length:
+            fraction = (target - traversed) / length
+            walked.append(
+                (
+                    start[0] + fraction * (end[0] - start[0]),
+                    start[1] + fraction * (end[1] - start[1]),
+                )
+            )
+            target += spacing
+        traversed += length
+
+    if points[0] != points[-1]:
+        walked.append(points[-1])
+    return tuple(walked)
+
+
 def sample_axis_lines(
     edges: tuple[SkeletonEdge, ...], spacing: float
 ) -> tuple[tuple[AxisPoint, ...], ...]:
@@ -145,47 +190,10 @@ def sample_axis_lines(
     if spacing <= 0:
         raise ValueError("The sample spacing must be positive")
 
-    samples = []
-    for edge in edges:
-        pixels = edge.pixels
-        if not pixels:
-            samples.append(())
-            continue
-
-        points = [(float(x), float(y)) for x, y in pixels]
-        if len(points) == 1:
-            samples.append((points[0],))
-            continue
-
-        segments = [
-            (start, end, hypot(end[0] - start[0], end[1] - start[1]))
-            for start, end in pairwise(points)
-        ]
-        total_length = sum(length for _, _, length in segments)
-        if total_length == 0:
-            samples.append((points[0],))
-            continue
-
-        edge_samples = [points[0]]
-        target = spacing
-        traversed = 0.0
-        for start, end, length in segments:
-            while target < traversed + length:
-                fraction = (target - traversed) / length
-                edge_samples.append(
-                    (
-                        start[0] + fraction * (end[0] - start[0]),
-                        start[1] + fraction * (end[1] - start[1]),
-                    )
-                )
-                target += spacing
-            traversed += length
-
-        if points[0] != points[-1]:
-            edge_samples.append(points[-1])
-        samples.append(tuple(edge_samples))
-
-    return tuple(samples)
+    return tuple(
+        _resample_polyline([(float(x), float(y)) for x, y in edge.pixels], spacing)
+        for edge in edges
+    )
 
 
 def neighboring_pixels(
@@ -450,8 +458,17 @@ def _overlapping_groups(
 
 
 def _merge_junctions(group: list[IntersectionTangents]) -> IntersectionTangents:
-    """Fuse a group into one junction sitting at the mean of their foci."""
-    foci = [member.focus for member in group if member.focus is not None]
+    """Fuse a group into one junction sitting at the mean of their foci.
+
+    A member holding rails already knows the cap its strokes meet at, so it
+    speaks for the group rather than being averaged away by a neighbour that
+    only guessed at a crossing.
+    """
+    foci = [
+        member.focus
+        for member in group
+        if member.rails and member.focus is not None
+    ] or [member.focus for member in group if member.focus is not None]
     widest = max(group, key=lambda member: member.radius)
     return IntersectionTangents(
         center=widest.center,
@@ -464,6 +481,7 @@ def _merge_junctions(group: list[IntersectionTangents]) -> IntersectionTangents:
             crossing for member in group for crossing in member.crossings
         ),
         focus=_centroid(foci) if foci else None,
+        rails=tuple(rail for member in group for rail in member.rails),
     )
 
 
@@ -483,6 +501,10 @@ def intersection_tangents(
     the triangle centre for the three of a T. Crossings between near-parallel
     tangents run off to infinity and crossings beyond ``reach`` radii belong to
     no stroke, so both are discarded.
+
+    A cut that swallowed an overlap spur brings its own focus, the cap the
+    spur points to, and keeps it: crossing the tangents there would put the
+    meeting point most of an axis width off the cap the strokes really share.
 
     Junctions whose discs overlap are then fused, and the fused junction sits
     at the mean of their foci. A corner has only ever been one cut, so it takes
@@ -527,7 +549,12 @@ def intersection_tangents(
                 junction=cut.junction,
                 tangents=tangents,
                 crossings=tuple(crossings),
-                focus=_centroid(crossings) if crossings else None,
+                focus=(
+                    cut.focus
+                    if cut.focus is not None
+                    else _centroid(crossings) if crossings else None
+                ),
+                rails=cut.rails,
             )
         )
 
@@ -538,15 +565,31 @@ def intersection_tangents(
     )
 
 
+def _claim_rail(
+    point: AxisPoint, spare: list[tuple[AxisPoint, ...]]
+) -> tuple[AxisPoint, ...]:
+    """Take the unfolded rail that runs out to a stroke end, if one is left."""
+    if not spare:
+        return ()
+    rail = min(
+        spare, key=lambda rail: hypot(rail[0][0] - point[0], rail[0][1] - point[1])
+    )
+    spare.remove(rail)
+    return rail
+
+
 def merge_tangent_foci(
     samples: tuple[tuple[AxisPoint, ...], ...],
     junctions: tuple[IntersectionTangents, ...],
+    spacing: float,
 ) -> SampledGraph:
     """Add each junction's focus to the sampled strokes and rejoin them there.
 
     Every stroke keeps its own chain of samples; the ends the cut left behind
     gain a segment back to their junction's focus, so the strokes a junction
-    separated meet again at one shared node.
+    separated meet again at one shared node. A junction holding rails hands each
+    end the one that runs out to it, so the stroke follows the centre line the
+    overlap hid instead of jumping the gap straight.
     """
     points: list[AxisPoint] = []
     indices: dict[AxisPoint, int] = {}
@@ -563,22 +606,86 @@ def merge_tangent_foci(
         for start, end in pairwise(edge_samples)
     ]
     foci = []
+    crossings = []
     for junction in junctions:
         if junction.focus is None:
             continue
         focus = node(junction.focus)
         foci.append(focus)
-        segments.extend((focus, node(tangent.point)) for tangent in junction.tangents)
-    return SampledGraph(tuple(points), tuple(segments), tuple(foci))
+        if junction.junction:
+            crossings.append(focus)
+        spare = list(junction.rails)
+        for tangent in junction.tangents:
+            rail = _claim_rail(tangent.point, spare)
+            if not rail:
+                segments.append((focus, node(tangent.point)))
+                continue
+            walk = _resample_polyline(
+                [junction.focus, *reversed(rail), tangent.point], spacing
+            )
+            segments.extend((node(start), node(end)) for start, end in pairwise(walk))
+    return SampledGraph(
+        tuple(points), tuple(segments), tuple(foci), tuple(crossings)
+    )
 
 
-def _graph_chains(graph: SampledGraph) -> list[list[int]]:
+def _straight_branches(
+    graph: SampledGraph,
+    adjacency: dict[int, list[int]],
+    max_turn: float,
+) -> dict[int, dict[int, int]]:
+    """Pair the branches one stroke runs straight on through at each junction.
+
+    A junction is where strokes cross, not where they end: the stem of an H
+    passes through both of its T-junctions and stays the single stroke a pen
+    would draw. Two branches carry the same stroke when the axis turns by less
+    than ``max_turn`` degrees between them, so a junction's branches are paired
+    off straightest first and whatever is left over — the bar of the T — starts
+    a stroke of its own.
+    """
+    limit = -cos(radians(max_turn))
+    passing: dict[int, dict[int, int]] = {}
+    for focus in graph.junctions:
+        directions: dict[int, AxisPoint] = {}
+        for neighbor in adjacency[focus]:
+            step_x = graph.points[neighbor][0] - graph.points[focus][0]
+            step_y = graph.points[neighbor][1] - graph.points[focus][1]
+            length = hypot(step_x, step_y)
+            if length:
+                directions[neighbor] = (step_x / length, step_y / length)
+
+        paired: dict[int, int] = {}
+        turns = sorted(
+            (
+                first[1][0] * second[1][0] + first[1][1] * second[1][1],
+                first[0],
+                second[0],
+            )
+            for first, second in combinations(sorted(directions.items()), 2)
+        )
+        for straightness, first_branch, second_branch in turns:
+            if (
+                straightness > limit
+                or first_branch in paired
+                or second_branch in paired
+            ):
+                continue
+            paired[first_branch] = second_branch
+            paired[second_branch] = first_branch
+        passing[focus] = paired
+    return passing
+
+
+def _graph_chains(graph: SampledGraph, max_turn: float) -> list[list[int]]:
     """Split the merged graph into the runs of points a single curve may span.
 
     A chain ends wherever the curve must not carry a tangent across: a stroke
     end, a focus, or any point more than two segments meet at. The focus of a
     corner joins exactly two strokes, so without breaking there the fit would
-    round the very point the cut exists to keep sharp.
+    round the very point the cut exists to keep sharp. A junction's focus is the
+    exception: the branches that run straight through it are one stroke crossing
+    another, and the chain carries on from one into the other rather than ending
+    there.
     """
     adjacency: dict[int, list[int]] = {index: [] for index in range(len(graph.points))}
     linked: set[frozenset[int]] = set()
@@ -590,19 +697,26 @@ def _graph_chains(graph: SampledGraph) -> list[list[int]]:
         adjacency[start].append(end)
         adjacency[end].append(start)
 
+    passing = _straight_branches(graph, adjacency, max_turn)
     breaks = set(graph.foci) | {
         index for index, neighbors in adjacency.items() if len(neighbors) != 2
     }
     walked: set[frozenset[int]] = set()
 
+    def onward(current: int, previous: int) -> list[int]:
+        if current not in breaks:
+            return adjacency[current]
+        crossed = passing.get(current, {}).get(previous)
+        return [] if crossed is None else [crossed]
+
     def walk(start: int, following: int) -> list[int]:
         chain = [start, following]
         walked.add(frozenset((start, following)))
         previous, current = start, following
-        while current not in breaks and current != start:
+        while current != start:
             candidates = [
                 neighbor
-                for neighbor in adjacency[current]
+                for neighbor in onward(current, previous)
                 if frozenset((current, neighbor)) not in walked
             ]
             if not candidates:
@@ -615,6 +729,8 @@ def _graph_chains(graph: SampledGraph) -> list[list[int]]:
     chains = []
     for index in sorted(breaks):
         for neighbor in adjacency[index]:
+            if passing.get(index, {}).get(neighbor) is not None:
+                continue
             if frozenset((index, neighbor)) not in walked:
                 chains.append(walk(index, neighbor))
     for index in range(len(graph.points)):
@@ -670,7 +786,7 @@ def _chain_curves(points: list[AxisPoint], alpha: float) -> tuple[BezierCurve, .
 
 
 def smooth_sampled_graph(
-    graph: SampledGraph, alpha: float = 0.5
+    graph: SampledGraph, alpha: float = 0.5, max_turn: float = 50.0
 ) -> tuple[tuple[BezierCurve, ...], ...]:
     """Replace the merged graph's straight segments with smooth Bezier chains.
 
@@ -678,11 +794,14 @@ def smooth_sampled_graph(
     through them is faceted even where the stroke is not. Every chain between
     the graph's corners and junctions is refitted as a Catmull-Rom spline and
     returned as its cubic Bezier spans, which carries the smoothing across the
-    whole image while the foci stay the sharp points they were solved for.
+    whole image while the corners stay the sharp points they were solved for.
+    A chain runs on through a junction whenever two of its branches turn by less
+    than ``max_turn`` degrees into one another, so a stroke crossed by another is
+    returned whole rather than as the pieces the crossing left.
     """
     return tuple(
         curves
-        for chain in _graph_chains(graph)
+        for chain in _graph_chains(graph, max_turn)
         if (curves := _chain_curves([graph.points[index] for index in chain], alpha))
     )
 
@@ -713,6 +832,7 @@ def _branch_cut(
 def junction_cuts(
     graph: SkeletonGraph,
     transitions: frozenset[PixelPoint],
+    spurs: Sequence[OverlapSpur] = (),
     max_reach: float = 3.0,
 ) -> tuple[AxisCut, ...]:
     """Claim for each junction the axis out to its branches' transition points.
@@ -723,6 +843,11 @@ def junction_cuts(
     there removes the bend the junction actually owns instead of whatever a
     circle covers. A branch with no transition point within ``max_reach`` radii
     falls back to the maximal-inscribed disc.
+
+    A branch that is an overlap spur has no transition point to stop on because
+    none of it is a stroke, so the whole of it is claimed and the junction takes
+    the spur's tip and rails: the strokes meet at the cap the spur points to,
+    not at a crossing of tangents an axis width away from it.
     """
     for intersection in graph.intersections:
         if intersection.radius is None:
@@ -735,11 +860,18 @@ def junction_cuts(
         for index, intersection in enumerate(graph.intersections)
         for pixel in intersection.pixels
     }
+    by_branch = {spur.pixels: spur for spur in spurs}
     claimed = [set(intersection.pixels) for intersection in graph.intersections]
+    unfolded: list[OverlapSpur | None] = [None] * len(graph.intersections)
     for edge in graph.edges:
         for pixels in (edge.pixels, edge.pixels[::-1]):
             index = owner.get(pixels[0])
             if index is None:
+                continue
+            spur = by_branch.get(pixels)
+            if spur is not None:
+                claimed[index].update(pixels)
+                unfolded[index] = spur
                 continue
             claimed[index].update(
                 _branch_cut(
@@ -753,8 +885,10 @@ def junction_cuts(
             radius=cast(float, intersection.radius),
             pixels=frozenset(pixels),
             junction=True,
+            focus=None if spur is None else spur.tip,
+            rails=() if spur is None else spur.rails,
         )
-        for intersection, pixels in zip(graph.intersections, claimed)
+        for intersection, pixels, spur in zip(graph.intersections, claimed, unfolded)
     )
 
 

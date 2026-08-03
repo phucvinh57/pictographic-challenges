@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from math import hypot
 from typing import cast
@@ -10,6 +11,7 @@ from scipy.ndimage import convolve, distance_transform_edt
 from scipy.spatial import KDTree
 
 PixelPoint = tuple[int, int]
+AxisPoint = tuple[float, float]
 
 _NEIGHBORHOOD_KERNEL = np.ones((3, 3), dtype=np.uint8)
 
@@ -162,6 +164,21 @@ class TransitionPoint:
 
     pixel: PixelPoint
     contact: DiscContact
+
+
+@dataclass(frozen=True)
+class OverlapSpur:
+    """The bisector two strokes leaving a shared cap raise, and the pair it hides.
+
+    ``pixels`` runs from the branch point out to the free tip, ``rails`` are the
+    two stroke centre lines it is the average of in the same order, and ``tip``
+    is the cap they meet at.
+    """
+
+    junction: PixelPoint
+    pixels: tuple[PixelPoint, ...]
+    tip: AxisPoint
+    rails: tuple[tuple[AxisPoint, ...], tuple[AxisPoint, ...]]
 
 
 @dataclass(frozen=True)
@@ -402,3 +419,121 @@ def transition_points(
         for index, bounded in ((0, run.bounded[0]), (-1, run.bounded[1]))
         if bounded and len(discs.discs[run.pixels[index]].contacts) == 2
     )
+
+
+def _unfold_branch(
+    walk: Sequence[AxisDisc], half_width: float
+) -> tuple[tuple[AxisPoint, ...], tuple[AxisPoint, ...]] | None:
+    """Split a bisector into the two stroke centre lines it averages.
+
+    The bisector sits at the same distance from both strokes' outer boundaries,
+    so each stroke's own centre line lies a half-width from its patch: the
+    bisector pixel slid ``radius - half_width`` towards that contact. Which
+    patch belongs to which stroke is settled by the side it falls on of the
+    walk, so the pair stays on its own rail rather than swapping halfway.
+    """
+    rails: tuple[list[AxisPoint], list[AxisPoint]] = ([], [])
+    for index, disc in enumerate(walk):
+        if len(disc.contacts) != 2:
+            continue
+        ahead = walk[min(index + 1, len(walk) - 1)].pixel
+        behind = walk[max(index - 1, 0)].pixel
+        step = (ahead[0] - behind[0], ahead[1] - behind[1])
+        offset = max(0.0, disc.radius - half_width)
+        placed: dict[int, AxisPoint] = {}
+        for contact in disc.contacts:
+            toward = (
+                contact.point[0] - disc.pixel[0],
+                contact.point[1] - disc.pixel[1],
+            )
+            length = hypot(toward[0], toward[1])
+            if not length:
+                continue
+            side = 0 if step[0] * toward[1] - step[1] * toward[0] >= 0 else 1
+            placed[side] = (
+                disc.pixel[0] + offset * toward[0] / length,
+                disc.pixel[1] + offset * toward[1] / length,
+            )
+        if len(placed) != 2:
+            continue
+        rails[0].append(placed[0])
+        rails[1].append(placed[1])
+
+    if not rails[0]:
+        return None
+    return tuple(rails[0]), tuple(rails[1])
+
+
+def overlap_spurs(
+    discs: AxisDiscs,
+    chains: tuple[tuple[PixelPoint, ...], ...],
+    junction_pixels: frozenset[PixelPoint],
+    half_width: float,
+    swell: float = 1.15,
+    spread: float = 1.0,
+    flat: float = 1.05,
+    cap: tuple[float, float] = (0.5, 1.5),
+) -> tuple[OverlapSpur, ...]:
+    """Find the branches that are an overlap's bisector rather than a stroke.
+
+    Two strokes leaving one shared cap overlap for as long as they stay within
+    a stroke width of each other, and the axis of that overlap is a branch the
+    thinning hangs off the junction. It is not ink anyone drew: stroking it
+    lays a flat bar over what the drawing flares into a wedge.
+
+    A stroke sits at the half-width along its whole length and only dips inside
+    its own cap, so a branch gives itself away when it never does. It counts as
+    a bisector when it ends free, its disc at the junction has swollen past
+    ``swell`` of the half-width, that swelling runs on for ``spread`` junction
+    radii, and it settles back within ``flat`` of the half-width for a stretch
+    ``cap`` half-widths long before the tip.
+
+    Every branch is swollen where it leaves a junction, for about the radius of
+    the junction's own disc, so the swelling has to outlast that to mean
+    anything. The stretch at the end is the shared cap itself, where the two
+    strokes still lie on top of one another, and demanding it is what tells this
+    apart from the axis running into a sharp corner of the outline. There the
+    disc is pinned by the corner's vertex and stays swollen to the last pixel,
+    and the strokes meet out at the vertex rather than back where the axis
+    gave up.
+    """
+    if half_width <= 0:
+        return ()
+
+    spurs = []
+    for chain in chains:
+        for pixels in (chain, chain[::-1]):
+            if len(pixels) < 2 or pixels[0] not in junction_pixels:
+                continue
+            if pixels[-1] in junction_pixels:
+                continue
+            walk = [discs.discs[pixel] for pixel in pixels if pixel in discs.discs]
+            if len(walk) != len(pixels) or walk[0].radius <= half_width * swell:
+                continue
+            settled = next(
+                (
+                    index
+                    for index, disc in enumerate(walk)
+                    if disc.radius <= half_width * flat
+                ),
+                len(walk),
+            )
+            if settled < walk[0].radius * spread:
+                continue
+            if not (half_width * cap[0] <= len(walk) - settled <= half_width * cap[1]):
+                continue
+            rails = _unfold_branch(walk, half_width)
+            if rails is None:
+                continue
+            spurs.append(
+                OverlapSpur(
+                    junction=pixels[0],
+                    pixels=tuple(pixels),
+                    tip=(
+                        (rails[0][-1][0] + rails[1][-1][0]) / 2,
+                        (rails[0][-1][1] + rails[1][-1][1]) / 2,
+                    ),
+                    rails=rails,
+                )
+            )
+    return tuple(spurs)

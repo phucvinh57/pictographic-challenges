@@ -24,7 +24,7 @@ def main() -> None:
     parser.add_argument(
         "--sample-spacing",
         type=float,
-        default=20.0,
+        default=50,
         metavar="PIXELS",
         help="arc-length spacing between axis samples (default: 10)",
     )

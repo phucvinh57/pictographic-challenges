@@ -20,6 +20,7 @@ from .medial_axis import (
     axis_stroke_width,
     corner_runs,
     extract_medial_axis,
+    overlap_spurs,
     transition_points,
 )
 from .svg import bezier_svg
@@ -46,9 +47,23 @@ def process_image(
     axis = extract_medial_axis(binary)
     graph = build_skeleton_graph(axis, binary)
     discs = axis_disc_contacts(binary, axis)
-    runs = corner_runs(discs, tuple(edge.pixels for edge in graph.edges))
+    width = axis_stroke_width(discs) if stroke_width is None else stroke_width
+    lines = tuple(edge.pixels for edge in graph.edges)
+    runs = corner_runs(discs, lines)
     transitions = transition_points(discs, runs)
-    junctions = junction_cuts(graph, frozenset(point.pixel for point in transitions))
+    spurs = overlap_spurs(
+        discs,
+        lines,
+        frozenset(
+            pixel
+            for intersection in graph.intersections
+            for pixel in intersection.pixels
+        ),
+        width / 2,
+    )
+    junctions = junction_cuts(
+        graph, frozenset(point.pixel for point in transitions), spurs
+    )
     cuts = junctions + corner_cuts(
         [(run.pixels, run.radius) for run in runs if all(run.bounded)], junctions
     )
@@ -58,9 +73,8 @@ def process_image(
     tangents = intersection_tangents(
         cuts, cut_graph.edges, sample_spacing, reach=TANGENT_REACH
     )
-    merged = merge_tangent_foci(samples, tangents)
+    merged = merge_tangent_foci(samples, tangents, sample_spacing)
     smoothed = smooth_sampled_graph(merged)
-    width = axis_stroke_width(discs) if stroke_width is None else stroke_width
 
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / f"{input_path.stem}.svg").write_text(
