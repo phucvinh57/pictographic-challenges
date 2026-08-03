@@ -29,13 +29,13 @@ def main() -> None:
         help="arc-length spacing between axis samples (default: 10)",
     )
     parser.add_argument(
-        "--cut-radius-scale",
+        "--stroke-width",
         type=float,
-        default=1.0,
-        metavar="SCALE",
+        default=None,
+        metavar="PIXELS",
         help=(
-            "multiplier on each intersection's maximal-inscribed radius when "
-            "cutting it out (default: 1.0)"
+            "width the smoothed curves are stroked at (default: measured from "
+            "the ink, twice the median maximal-inscribed radius)"
         ),
     )
     args = parser.parse_args()
@@ -47,9 +47,9 @@ def main() -> None:
             relative_dir = image_path.parent.relative_to(args.input)
             out_dir = args.output / relative_dir
             process_image(
-                image_path, out_dir, args.sample_spacing, args.cut_radius_scale
+                image_path, out_dir, args.sample_spacing, args.stroke_width
             )
     else:
         process_image(
-            args.input, args.output, args.sample_spacing, args.cut_radius_scale
+            args.input, args.output, args.sample_spacing, args.stroke_width
         )

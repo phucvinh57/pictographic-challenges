@@ -6,15 +6,23 @@ import cv2
 import numpy as np
 
 from .graph import (
-    IntersectionTangents,
-    SampledGraph,
     build_skeleton_graph,
+    corner_cuts,
     intersection_tangents,
+    junction_cuts,
     merge_tangent_foci,
-    remove_intersection_neighborhoods,
+    remove_axis_cuts,
     sample_axis_lines,
+    smooth_sampled_graph,
 )
-from .medial_axis import extract_medial_axis
+from .medial_axis import (
+    axis_disc_contacts,
+    axis_stroke_width,
+    corner_runs,
+    extract_medial_axis,
+    transition_points,
+)
+from .svg import bezier_svg
 
 TANGENT_REACH = 3.0
 
@@ -24,63 +32,11 @@ def binarize(gray: np.ndarray) -> np.ndarray:
     return binary
 
 
-def draw_axis_samples(
-    axis: np.ndarray, samples: tuple[tuple[tuple[float, float], ...], ...]
-) -> np.ndarray:
-    """Render the axis in black with its sampled points highlighted in red."""
-    canvas = cv2.cvtColor(axis, cv2.COLOR_GRAY2BGR)
-    for edge_samples in samples:
-        for x, y in edge_samples:
-            cv2.circle(canvas, (round(x), round(y)), 2, (0, 0, 255), -1)
-    return canvas
-
-
-def draw_intersection_tangents(
-    axis: np.ndarray,
-    junctions: tuple[IntersectionTangents, ...],
-) -> np.ndarray:
-    """Render each junction's tangent crossings and their focus."""
-    canvas = cv2.cvtColor(axis, cv2.COLOR_GRAY2BGR)
-    scale = max(1, min(axis.shape) // 512)
-    for junction in junctions:
-        cv2.circle(
-            canvas,
-            junction.center,
-            round(junction.radius),
-            (190, 190, 190),
-            scale,
-            cv2.LINE_AA,
-        )
-        if junction.focus is not None:
-            x, y = junction.focus
-            cv2.circle(
-                canvas, (round(x), round(y)), 3 * scale, (0, 0, 255), -1, cv2.LINE_AA
-            )
-    return canvas
-
-
-def draw_sampled_graph(shape: tuple[int, int], graph: SampledGraph) -> np.ndarray:
-    """Render the merged graph as straight segments between its points."""
-    canvas = np.full((*shape, 3), 255, dtype=np.uint8)
-    scale = max(1, min(shape) // 512)
-    for start, end in graph.segments:
-        first, second = graph.points[start], graph.points[end]
-        cv2.line(
-            canvas,
-            (round(first[0]), round(first[1])),
-            (round(second[0]), round(second[1])),
-            (0, 0, 0),
-            scale,
-            cv2.LINE_AA,
-        )
-    return canvas
-
-
 def process_image(
     input_path: Path,
     output_dir: Path,
     sample_spacing: float = 10.0,
-    cut_radius_scale: float = 1.0,
+    stroke_width: float | None = None,
 ) -> None:
     gray = cv2.imread(str(input_path), cv2.IMREAD_GRAYSCALE)
     if gray is None:
@@ -88,30 +44,25 @@ def process_image(
 
     binary = binarize(gray)
     axis = extract_medial_axis(binary)
-    graph = build_skeleton_graph(axis, binary, cut_radius_scale)
-    cut_axis = remove_intersection_neighborhoods(axis, graph.intersections)
+    graph = build_skeleton_graph(axis, binary)
+    discs = axis_disc_contacts(binary, axis)
+    runs = corner_runs(discs, tuple(edge.pixels for edge in graph.edges))
+    transitions = transition_points(discs, runs)
+    junctions = junction_cuts(graph, frozenset(point.pixel for point in transitions))
+    cuts = junctions + corner_cuts(
+        [(run.pixels, run.radius) for run in runs if all(run.bounded)], junctions
+    )
+    cut_axis = remove_axis_cuts(axis, cuts)
     cut_graph = build_skeleton_graph(cut_axis)
     samples = sample_axis_lines(cut_graph.edges, sample_spacing)
-    junctions = intersection_tangents(
-        graph.intersections, cut_graph.edges, sample_spacing, reach=TANGENT_REACH
+    tangents = intersection_tangents(
+        cuts, cut_graph.edges, sample_spacing, reach=TANGENT_REACH
     )
-    merged = merge_tangent_foci(samples, junctions)
+    merged = merge_tangent_foci(samples, tangents)
+    smoothed = smooth_sampled_graph(merged)
+    width = axis_stroke_width(discs) if stroke_width is None else stroke_width
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    stem = input_path.stem
-
-    cv2.imwrite(str(output_dir / f"{stem}-1-binarize.png"), binary)
-    cv2.imwrite(str(output_dir / f"{stem}-2-skeleton.png"), axis)
-    cv2.imwrite(str(output_dir / f"{stem}-3-skeleton-cut-intersections.png"), cut_axis)
-    cv2.imwrite(
-        str(output_dir / f"{stem}-4-skeleton-samples.png"),
-        draw_axis_samples(cut_axis, samples),
-    )
-    cv2.imwrite(
-        str(output_dir / f"{stem}-5-tangent-crossings.png"),
-        draw_intersection_tangents(cut_axis, junctions),
-    )
-    cv2.imwrite(
-        str(output_dir / f"{stem}-6-merged-graph.png"),
-        draw_sampled_graph(axis.shape, merged),
+    (output_dir / f"{input_path.stem}.svg").write_text(
+        bezier_svg(axis.shape, smoothed, width)
     )

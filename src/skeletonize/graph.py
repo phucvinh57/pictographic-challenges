@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from itertools import combinations, pairwise
 from math import hypot
@@ -53,6 +54,16 @@ class SkeletonIntersection:
 
 
 @dataclass(frozen=True)
+class AxisCut:
+    """A bend of the axis removed so the strokes around it are left straight."""
+
+    center: PixelPoint
+    radius: float
+    pixels: frozenset[PixelPoint]
+    junction: bool
+
+
+@dataclass(frozen=True)
 class EdgeTangent:
     edge_id: int
     point: AxisPoint
@@ -63,6 +74,7 @@ class EdgeTangent:
 class IntersectionTangents:
     center: PixelPoint
     radius: float
+    junction: bool
     tangents: tuple[EdgeTangent, ...]
     crossings: tuple[AxisPoint, ...]
     focus: AxisPoint | None
@@ -73,6 +85,14 @@ class SampledGraph:
     points: tuple[AxisPoint, ...]
     segments: tuple[tuple[int, int], ...]
     foci: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class BezierCurve:
+    start: AxisPoint
+    first_control: AxisPoint
+    second_control: AxisPoint
+    end: AxisPoint
 
 
 @dataclass(frozen=True)
@@ -294,20 +314,13 @@ def _component_center(
 
 
 def build_skeleton_graph(
-    axis: np.ndarray, binary: np.ndarray | None = None, radius_scale: float = 1.0
+    axis: np.ndarray, binary: np.ndarray | None = None
 ) -> SkeletonGraph:
-    """Build pixel adjacency, traced edges, endpoints, and junctions.
-
-    ``radius_scale`` widens or narrows every junction's maximal-inscribed
-    radius, which is the radius the cutting step removes and the one the
-    tangent fit then works from.
-    """
+    """Build pixel adjacency, traced edges, endpoints, and junctions."""
     if axis.ndim != 2:
         raise ValueError("The skeleton must be a two-dimensional image")
     if binary is not None and binary.shape != axis.shape:
         raise ValueError("The binary image and skeleton must have the same shape")
-    if radius_scale <= 0:
-        raise ValueError("The intersection radius scale must be positive")
 
     ys, xs = np.nonzero(axis < 128)
     pixels: set[PixelPoint] = set(zip(xs.tolist(), ys.tolist()))
@@ -324,9 +337,7 @@ def build_skeleton_graph(
     for component in _intersection_components(adjacency):
         center = _component_center(component, adjacency)
         radius = (
-            _inscribed_radius(distances, center) * radius_scale
-            if distances is not None
-            else None
+            _inscribed_radius(distances, center) if distances is not None else None
         )
         intersections.append(
             SkeletonIntersection(
@@ -349,26 +360,17 @@ def build_skeleton_graph(
     )
 
 
-def _cut_intersection(
-    point: AxisPoint,
-    intersections: tuple[SkeletonIntersection, ...],
-    tolerance: float,
+def _adjacent_cut(
+    point: PixelPoint, removed: dict[PixelPoint, PixelPoint]
 ) -> PixelPoint | None:
-    """The junction whose removed disc this stroke end was left sitting on."""
-    nearest: tuple[float, PixelPoint] | None = None
-    for intersection in intersections:
-        if intersection.radius is None:
-            raise ValueError(
-                "Intersection radii are unavailable; build the graph with binary"
-            )
-        distance = hypot(
-            point[0] - intersection.center[0], point[1] - intersection.center[1]
-        )
-        if distance > intersection.radius + tolerance:
-            continue
-        if nearest is None or distance < nearest[0]:
-            nearest = (distance, intersection.center)
-    return None if nearest is None else nearest[1]
+    """The junction whose cut left this stroke end free."""
+    x, y = point
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            center = removed.get((x + dx, y + dy))
+            if center is not None:
+                return center
+    return None
 
 
 def _tail_run(pixels: tuple[PixelPoint, ...], spacing: float) -> tuple[PixelPoint, ...]:
@@ -454,6 +456,7 @@ def _merge_junctions(group: list[IntersectionTangents]) -> IntersectionTangents:
     return IntersectionTangents(
         center=widest.center,
         radius=widest.radius,
+        junction=True,
         tangents=tuple(
             tangent for member in group for tangent in member.tangents
         ),
@@ -465,38 +468,37 @@ def _merge_junctions(group: list[IntersectionTangents]) -> IntersectionTangents:
 
 
 def intersection_tangents(
-    intersections: tuple[SkeletonIntersection, ...],
+    cuts: tuple[AxisCut, ...],
     edges: tuple[SkeletonEdge, ...],
     spacing: float,
     parallel_tolerance: float = 0.2,
     reach: float = 3.0,
-    tolerance: float = 2.0,
 ) -> tuple[IntersectionTangents, ...]:
-    """Take a tangent at every stroke end the intersection cut left behind.
+    """Take a tangent at every stroke end a cut left behind.
 
     The tangent is fitted to the pixels a stroke end spends inside its first
     sample interval, so ``spacing`` sets the arc length the fit spans. Each
-    junction's tangents are extended until they cross one another; the focus is
-    the centroid of those crossings, which is the midpoint for the two
-    crossings of a corner and the triangle centre for the three of a T.
-    Crossings between near-parallel tangents run off to infinity and crossings
-    beyond ``reach`` radii belong to no stroke, so both are discarded.
+    cut's tangents are extended until they cross one another; the focus is the
+    centroid of those crossings, which is the single crossing of a corner and
+    the triangle centre for the three of a T. Crossings between near-parallel
+    tangents run off to infinity and crossings beyond ``reach`` radii belong to
+    no stroke, so both are discarded.
 
     Junctions whose discs overlap are then fused, and the fused junction sits
-    at the mean of their foci.
+    at the mean of their foci. A corner has only ever been one cut, so it takes
+    no part in that.
     """
     if spacing <= 0:
         raise ValueError("The sample spacing must be positive")
 
-    collected: dict[PixelPoint, list[EdgeTangent]] = {
-        intersection.center: [] for intersection in intersections
-    }
+    removed = {pixel: cut.center for cut in cuts for pixel in cut.pixels}
+    collected: dict[PixelPoint, list[EdgeTangent]] = {cut.center: [] for cut in cuts}
     for edge in edges:
         if len(edge.pixels) < 2:
             continue
         for pixels in (edge.pixels, edge.pixels[::-1]):
             run = _tail_run(pixels, spacing)
-            center = _cut_intersection(run[0], intersections, tolerance)
+            center = _adjacent_cut(run[0], removed)
             direction = _tangent_direction(run)
             if center is None or direction is None:
                 continue
@@ -505,30 +507,35 @@ def intersection_tangents(
             )
 
     results = []
-    for intersection in intersections:
-        tangents = tuple(collected[intersection.center])
-        radius = cast(float, intersection.radius)
+    for cut in cuts:
+        tangents = tuple(collected[cut.center])
         crossings = []
         for first, second in combinations(tangents, 2):
             crossing = _line_crossing(first, second, parallel_tolerance)
             if crossing is None:
                 continue
             distance = hypot(
-                crossing[0] - intersection.center[0],
-                crossing[1] - intersection.center[1],
+                crossing[0] - cut.center[0],
+                crossing[1] - cut.center[1],
             )
-            if distance <= reach * radius:
+            if distance <= reach * cut.radius:
                 crossings.append(crossing)
         results.append(
             IntersectionTangents(
-                center=intersection.center,
-                radius=radius,
+                center=cut.center,
+                radius=cut.radius,
+                junction=cut.junction,
                 tangents=tangents,
                 crossings=tuple(crossings),
                 focus=_centroid(crossings) if crossings else None,
             )
         )
-    return tuple(_merge_junctions(group) for group in _overlapping_groups(results))
+
+    junctions = [result for result in results if result.junction]
+    return tuple(
+        [_merge_junctions(group) for group in _overlapping_groups(junctions)]
+        + [result for result in results if not result.junction]
+    )
 
 
 def merge_tangent_foci(
@@ -565,21 +572,224 @@ def merge_tangent_foci(
     return SampledGraph(tuple(points), tuple(segments), tuple(foci))
 
 
-def remove_intersection_neighborhoods(
-    axis: np.ndarray, intersections: tuple[SkeletonIntersection, ...]
-) -> np.ndarray:
-    """Remove skeleton pixels inside each junction's maximal-inscribed circle."""
-    cleaned = axis.copy()
-    skeleton_y, skeleton_x = np.nonzero(axis < 128)
-    for intersection in intersections:
+def _graph_chains(graph: SampledGraph) -> list[list[int]]:
+    """Split the merged graph into the runs of points a single curve may span.
+
+    A chain ends wherever the curve must not carry a tangent across: a stroke
+    end, a focus, or any point more than two segments meet at. The focus of a
+    corner joins exactly two strokes, so without breaking there the fit would
+    round the very point the cut exists to keep sharp.
+    """
+    adjacency: dict[int, list[int]] = {index: [] for index in range(len(graph.points))}
+    linked: set[frozenset[int]] = set()
+    for start, end in graph.segments:
+        link = frozenset((start, end))
+        if start == end or link in linked:
+            continue
+        linked.add(link)
+        adjacency[start].append(end)
+        adjacency[end].append(start)
+
+    breaks = set(graph.foci) | {
+        index for index, neighbors in adjacency.items() if len(neighbors) != 2
+    }
+    walked: set[frozenset[int]] = set()
+
+    def walk(start: int, following: int) -> list[int]:
+        chain = [start, following]
+        walked.add(frozenset((start, following)))
+        previous, current = start, following
+        while current not in breaks and current != start:
+            candidates = [
+                neighbor
+                for neighbor in adjacency[current]
+                if frozenset((current, neighbor)) not in walked
+            ]
+            if not candidates:
+                break
+            previous, current = current, candidates[0]
+            walked.add(frozenset((previous, current)))
+            chain.append(current)
+        return chain
+
+    chains = []
+    for index in sorted(breaks):
+        for neighbor in adjacency[index]:
+            if frozenset((index, neighbor)) not in walked:
+                chains.append(walk(index, neighbor))
+    for index in range(len(graph.points)):
+        for neighbor in adjacency[index]:
+            if frozenset((index, neighbor)) not in walked:
+                chains.append(walk(index, neighbor))
+    return chains
+
+
+def _chain_curves(points: list[AxisPoint], alpha: float) -> tuple[BezierCurve, ...]:
+    """Fit one cubic Bezier per span of a chain, interpolating every point.
+
+    The controls come from a Catmull-Rom spline, so each span keeps the samples
+    it was built from and meets its neighbours with a shared tangent. ``alpha``
+    parameterises the spline by the sampled distances raised to that power —
+    the centripetal 0.5 keeps a control point from overshooting where the
+    spacing jumps, which is exactly what the long segment into a focus does.
+    """
+    if len(points) < 2:
+        return ()
+
+    closed = len(points) > 2 and points[0] == points[-1]
+    padded = (
+        [points[-2], *points, points[1]] if closed else [points[0], *points, points[-1]]
+    )
+    knots = [0.0]
+    for start, end in pairwise(padded):
+        step = hypot(end[0] - start[0], end[1] - start[1])
+        knots.append(knots[-1] + max(step, 1e-6) ** alpha)
+
+    curves = []
+    for index in range(1, len(padded) - 2):
+        first, second = padded[index], padded[index + 1]
+        before, after = padded[index - 1], padded[index + 2]
+        span = knots[index + 1] - knots[index]
+        leading = span / (3 * (knots[index + 1] - knots[index - 1]))
+        trailing = span / (3 * (knots[index + 2] - knots[index]))
+        curves.append(
+            BezierCurve(
+                start=first,
+                first_control=(
+                    first[0] + leading * (second[0] - before[0]),
+                    first[1] + leading * (second[1] - before[1]),
+                ),
+                second_control=(
+                    second[0] - trailing * (after[0] - first[0]),
+                    second[1] - trailing * (after[1] - first[1]),
+                ),
+                end=second,
+            )
+        )
+    return tuple(curves)
+
+
+def smooth_sampled_graph(
+    graph: SampledGraph, alpha: float = 0.5
+) -> tuple[tuple[BezierCurve, ...], ...]:
+    """Replace the merged graph's straight segments with smooth Bezier chains.
+
+    The samples are an arc-length walk of a thinned axis, so the polyline
+    through them is faceted even where the stroke is not. Every chain between
+    the graph's corners and junctions is refitted as a Catmull-Rom spline and
+    returned as its cubic Bezier spans, which carries the smoothing across the
+    whole image while the foci stay the sharp points they were solved for.
+    """
+    return tuple(
+        curves
+        for chain in _graph_chains(graph)
+        if (curves := _chain_curves([graph.points[index] for index in chain], alpha))
+    )
+
+
+def _branch_cut(
+    pixels: tuple[PixelPoint, ...],
+    intersection: SkeletonIntersection,
+    transitions: frozenset[PixelPoint],
+    max_reach: float,
+) -> tuple[PixelPoint, ...]:
+    """Walk one branch out of a junction and stop on its transition point."""
+    center = intersection.center
+    radius = cast(float, intersection.radius)
+    walked = [pixels[0]]
+    for pixel in pixels[1:]:
+        if hypot(pixel[0] - center[0], pixel[1] - center[1]) > max_reach * radius:
+            break
+        walked.append(pixel)
+        if pixel in transitions:
+            return tuple(walked)
+    return tuple(
+        pixel
+        for pixel in walked
+        if hypot(pixel[0] - center[0], pixel[1] - center[1]) <= radius
+    )
+
+
+def junction_cuts(
+    graph: SkeletonGraph,
+    transitions: frozenset[PixelPoint],
+    max_reach: float = 3.0,
+) -> tuple[AxisCut, ...]:
+    """Claim for each junction the axis out to its branches' transition points.
+
+    A junction's disc is pinned by the corners of the notches around it and
+    stays pinned while the axis is inside their fans, so the transition point on
+    a branch is where the junction ends and the stroke proper begins. Cutting
+    there removes the bend the junction actually owns instead of whatever a
+    circle covers. A branch with no transition point within ``max_reach`` radii
+    falls back to the maximal-inscribed disc.
+    """
+    for intersection in graph.intersections:
         if intersection.radius is None:
             raise ValueError(
                 "Intersection radii are unavailable; build the graph with binary"
             )
-        center_x, center_y = intersection.center
-        within_circle = (
-            (skeleton_x - center_x) ** 2 + (skeleton_y - center_y) ** 2
-            <= intersection.radius**2
+
+    owner = {
+        pixel: index
+        for index, intersection in enumerate(graph.intersections)
+        for pixel in intersection.pixels
+    }
+    claimed = [set(intersection.pixels) for intersection in graph.intersections]
+    for edge in graph.edges:
+        for pixels in (edge.pixels, edge.pixels[::-1]):
+            index = owner.get(pixels[0])
+            if index is None:
+                continue
+            claimed[index].update(
+                _branch_cut(
+                    pixels, graph.intersections[index], transitions, max_reach
+                )
+            )
+
+    return tuple(
+        AxisCut(
+            center=intersection.center,
+            radius=cast(float, intersection.radius),
+            pixels=frozenset(pixels),
+            junction=True,
         )
-        cleaned[skeleton_y[within_circle], skeleton_x[within_circle]] = 255
+        for intersection, pixels in zip(graph.intersections, claimed)
+    )
+
+
+def corner_cuts(
+    runs: Sequence[tuple[Sequence[PixelPoint], float]],
+    junctions: tuple[AxisCut, ...],
+) -> tuple[AxisCut, ...]:
+    """Cut away each corner's fan, the axis between its two transition points.
+
+    A corner drives the axis to bend through its whole fan, so the fan is the
+    rounding the corner put there and none of it belongs to either stroke;
+    removing it leaves the two straight pieces to be rejoined at the crossing
+    of their tangents, which is the corner itself. A fan a junction already
+    claimed is left alone, that bend belongs to the junction.
+    """
+    claimed = {pixel for cut in junctions for pixel in cut.pixels}
+    cuts = []
+    for pixels, radius in runs:
+        if not pixels or any(pixel in claimed for pixel in pixels):
+            continue
+        cuts.append(
+            AxisCut(
+                center=pixels[len(pixels) // 2],
+                radius=radius,
+                pixels=frozenset(pixels),
+                junction=False,
+            )
+        )
+    return tuple(cuts)
+
+
+def remove_axis_cuts(axis: np.ndarray, cuts: tuple[AxisCut, ...]) -> np.ndarray:
+    """Remove every axis pixel a cut claimed."""
+    cleaned = axis.copy()
+    for cut in cuts:
+        for x, y in cut.pixels:
+            cleaned[y, x] = 255
     return cleaned

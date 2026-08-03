@@ -3,18 +3,10 @@
 Binarizes images and extracts each drawing's medial axis from the original
 ink mask.
 
-For each input image, the following outputs are produced:
-
-- `<name>-1-binarize.png` — Otsu-thresholded black & white image
-- `<name>-2-skeleton.png` — one-pixel medial axis of the original ink
-- `<name>-3-skeleton-cut-intersections.png` — skeleton with every intersection's
-  maximal-inscribed circle removed
-- `<name>-4-skeleton-samples.png` — intersection-cut medial axis with evenly
-  spaced sample points highlighted in red
-- `<name>-5-tangent-crossings.png` — each junction's removed circle (grey) and
-  the focus its stroke-end crossings settle on (red), over the cut axis
-- `<name>-6-merged-graph.png` — the sampled strokes rejoined at each junction's
-  focus and drawn as straight segments
+Each input image produces one output, `<name>.svg`: the drawing's axis as cubic
+Bezier curves, smooth along every stroke while junctions meet and corners come
+to a point, stroked at the ink's own width with round caps and joins over a
+white background.
 
 ## Install
 
@@ -58,11 +50,16 @@ Axis samples are spaced 10 pixels apart by default. Choose another spacing with
 uv run skeletonize --sample-spacing 5 input/skeletonize/letter_K.png output/skeletonize
 ```
 
-Each intersection is cut with its maximal-inscribed circle. Widen or narrow
-that cut with `--cut-radius-scale`, a multiplier on the radius:
+Each intersection is cut back to the transition point on every branch leaving
+it, and falls back to its maximal-inscribed circle where a branch has no
+transition point; corners are cut between the pair of transition points that
+bound them.
+
+The curves are stroked at the ink's own width, twice the median
+maximal-inscribed radius of the axis. Override it with `--stroke-width`:
 
 ```bash
-uv run skeletonize --cut-radius-scale 1.5 input/skeletonize/letter_K.png output/skeletonize
+uv run skeletonize --stroke-width 12 input/skeletonize/letter_K.png output/skeletonize
 ```
 
 Process a different directory into another directory:
@@ -139,6 +136,7 @@ src/skeletonize/
   skeletonize.py              binarize() and process_image() orchestration
   medial_axis.py              distance-ordered medial-axis thinning
   graph.py                    graph construction, intersection removal, tangent crossings
+  svg.py                      stroked SVG output
 input/                        source images, organized by challenge
-output/                       generated raster diagnostics and SVG results
+output/                       generated SVG results
 ```
