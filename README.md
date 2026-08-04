@@ -6,6 +6,9 @@ Each input image produces one output, `<name>.svg`: one cubic Bezier path per
 stroke, smooth along its length while corners come to a point, stroked at the
 ink's own width with round caps and joins over a white background.
 
+For a stage-by-stage explanation of the outline vectorizer, see
+[Challenge 1: raster outline to SVG](docs/challenge-1.md).
+
 ## Install
 
 This project is managed with [`uv`](https://docs.astral.sh/uv/). Install `uv`
@@ -36,19 +39,19 @@ curves:
 uv run challenge_1
 ```
 
-Each input produces `<name>-binarize.png`, `<name>-edges.png`, the color debug
-image `<name>-lines.png`, `<name>-vector.svg`, and `<name>-filled.svg`. You can
+Each input produces `<name>-1-binarize.png`, the color debug image
+`<name>-2-contours.png`, `<name>-vector.svg`, and `<name>-filled.svg`. You can
 also process a different image or directory:
 
-The edge image is the extracted raster edge map, before smoothing. The colored
-line image, vector preview, and compact filled SVG come from one shared set of
-fitted contours. The vector output marks the Bezier anchors over each colored
-contour. The filled output puts every closed contour in one compound path and
-fills alternate regions using SVG's even-odd rule.
+The contour image shows the closed boundaries extracted from the binary image
+after pixel staircases and redundant points are removed. The vector preview and
+compact filled SVG come from the fitted contours. The vector output marks the
+Bezier anchors over each colored contour. The filled output puts every closed
+contour in one compound path and fills alternate regions using SVG's even-odd
+rule.
 
-The binary and edge images use black foreground pixels on white. The colored
-preview flattens the Beziers to within a quarter pixel and draws them
-anti-aliased. The lines image uses one random color per contour.
+The binary image uses black foreground pixels on white. The contour debug image
+uses one random color per contour.
 
 ```bash
 uv run challenge_1 --input input/challenge_1/cabinet.png --output output/challenge_1

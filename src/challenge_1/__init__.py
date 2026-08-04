@@ -11,16 +11,15 @@ import numpy as np
 from pictographic.curves import (
     AxisPoint,
     BezierCurve,
-    flatten_curves,
-    smooth_closed_contour,
+    fit_closed_contour,
+    simplify_staircase,
+    subdivide_closed_path,
 )
 from pictographic.svg import bezier_svg, filled_bezier_svg
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
-DEFAULT_ANGLE_THRESHOLD = 80
+DEFAULT_ANGLE_THRESHOLD = 60
 DEFAULT_SMOOTH_TOLERANCE = 1.5
-EDGE_LOW_THRESHOLD = 50.0
-EDGE_HIGH_THRESHOLD = 150.0
 
 
 def binarize(gray: np.ndarray, threshold: int | None) -> np.ndarray:
@@ -32,13 +31,7 @@ def binarize(gray: np.ndarray, threshold: int | None) -> np.ndarray:
     return binary
 
 
-def extract_edges(binary: np.ndarray) -> np.ndarray:
-    return cv2.bitwise_not(
-        cv2.Canny(binary, EDGE_LOW_THRESHOLD, EDGE_HIGH_THRESHOLD)
-    )
-
-
-def random_line_colors(count: int) -> tuple[str, ...]:
+def random_contour_colors(count: int) -> tuple[str, ...]:
     colors = []
     used = set()
     while len(colors) < count:
@@ -57,25 +50,19 @@ def _bgr(color: str) -> tuple[int, int, int]:
     return int(color[5:7], 16), int(color[3:5], 16), int(color[1:3], 16)
 
 
-def draw_curves(
+def draw_contours(
     shape: tuple[int, int],
-    contours: tuple[tuple[BezierCurve, ...], ...],
-    colors: tuple[str, ...] | None = None,
+    contours: tuple[tuple[AxisPoint, ...], ...],
+    colors: tuple[str, ...],
 ) -> np.ndarray:
-    image = np.full((*shape, 3), 255, dtype=np.uint8) if colors else np.full(
-        shape, 255, dtype=np.uint8
-    )
-    for index, curves in enumerate(contours):
-        flattened = flatten_curves(curves)
-        if len(flattened) < 2:
-            continue
-        points = np.rint(np.asarray(flattened) * 256).astype(np.int32)
-        color = _bgr(colors[index]) if colors else 0
+    image = np.full((*shape, 3), 255, dtype=np.uint8)
+    for contour, color in zip(contours, colors, strict=True):
+        points = np.rint(np.asarray(contour) * 256).astype(np.int32)
         cv2.polylines(
             image,
             [points],
-            False,
-            color,
+            True,
+            _bgr(color),
             1,
             cv2.LINE_AA,
             shift=8,
@@ -178,20 +165,28 @@ def foreground_contours(binary: np.ndarray) -> tuple[tuple[AxisPoint, ...], ...]
     return tuple(contours)
 
 
+def simplify_contours(
+    contours: tuple[tuple[AxisPoint, ...], ...],
+) -> tuple[tuple[AxisPoint, ...], ...]:
+    return tuple(
+        simplified
+        for contour in contours
+        if (simplified := simplify_staircase(contour))
+    )
+
+
 def smooth_contours(
     contours: tuple[tuple[AxisPoint, ...], ...],
     angle_threshold: float,
     smooth_tolerance: float,
 ) -> tuple[tuple[BezierCurve, ...], ...]:
-    return tuple(
-        curves
-        for contour in contours
-        if (
-            curves := smooth_closed_contour(
-                contour, angle_threshold, smooth_tolerance
-            )
-        )
-    )
+    result = []
+    for contour in contours:
+        smoothed, corners = subdivide_closed_path(contour, angle_threshold)
+        curves = fit_closed_contour(smoothed, corners, smooth_tolerance)
+        if curves:
+            result.append(curves)
+    return tuple(result)
 
 
 def curve_anchors(
@@ -206,8 +201,7 @@ def curve_anchors(
 def process_image(
     input_path: Path,
     binary_path: Path,
-    edges_path: Path,
-    lines_path: Path,
+    contours_path: Path,
     vector_path: Path,
     filled_path: Path,
     threshold: int | None,
@@ -219,12 +213,12 @@ def process_image(
         raise ValueError(f"Could not read image: {input_path}")
 
     binary = binarize(gray, threshold)
-    curves = smooth_contours(
-        foreground_contours(binary), angle_threshold, smooth_tolerance
+    contours = simplify_contours(foreground_contours(binary))
+    contours_debug = draw_contours(
+        binary.shape, contours, random_contour_colors(len(contours))
     )
-    colors = random_line_colors(len(curves))
-    edges = extract_edges(binary)
-    lines_debug = draw_curves(binary.shape, curves, colors)
+    curves = smooth_contours(contours, angle_threshold, smooth_tolerance)
+    colors = random_contour_colors(len(curves))
     vector = bezier_svg(
         binary.shape,
         curves,
@@ -235,30 +229,27 @@ def process_image(
     filled = filled_bezier_svg(binary.shape, curves)
 
     binary_path.parent.mkdir(parents=True, exist_ok=True)
-    edges_path.parent.mkdir(parents=True, exist_ok=True)
-    lines_path.parent.mkdir(parents=True, exist_ok=True)
+    contours_path.parent.mkdir(parents=True, exist_ok=True)
     vector_path.parent.mkdir(parents=True, exist_ok=True)
     filled_path.parent.mkdir(parents=True, exist_ok=True)
 
     if not cv2.imwrite(str(binary_path), binary):
         raise OSError(f"Could not write image: {binary_path}")
-    if not cv2.imwrite(str(edges_path), edges):
-        raise OSError(f"Could not write image: {edges_path}")
-    if not cv2.imwrite(str(lines_path), lines_debug):
-        raise OSError(f"Could not write image: {lines_path}")
+    if not cv2.imwrite(str(contours_path), contours_debug):
+        raise OSError(f"Could not write image: {contours_path}")
+
     vector_path.write_text(vector)
     filled_path.write_text(filled)
 
 
 def output_paths_for(
     image_path: Path, input_root: Path, output_root: Path
-) -> tuple[Path, Path, Path, Path, Path]:
+) -> tuple[Path, Path, Path, Path]:
     relative_path = image_path.relative_to(input_root)
     output_dir = output_root / relative_path.parent
     return (
-        output_dir / f"{relative_path.stem}-binarize.png",
-        output_dir / f"{relative_path.stem}-edges.png",
-        output_dir / f"{relative_path.stem}-lines.png",
+        output_dir / f"{relative_path.stem}-1-binarize.png",
+        output_dir / f"{relative_path.stem}-2-contours.png",
         output_dir / f"{relative_path.stem}-vector.svg",
         output_dir / f"{relative_path.stem}-filled.svg",
     )

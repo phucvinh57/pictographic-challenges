@@ -103,8 +103,8 @@ once — less the half pixel of it that lies outside the ink, and `--stroke-widt
 (`process_image(stroke_width=...)`) overrides it. An SVG has no background of its
 own, so the paths are laid over an opaque white rectangle.
 
-`challenge_1/binarize.py` provides the standalone challenge 1 raster pipeline,
-Canny edge graph tracing, and color line debug output.
+`challenge_1` provides the standalone challenge 1 raster pipeline, simplified
+contour debug output, and vector output.
 `skeletonize.py::process_image` writes one file, `<stem>.svg`.
 
 Binary images use ink = 0 (black) and background = 255 (white).
