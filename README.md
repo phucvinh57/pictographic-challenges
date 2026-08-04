@@ -1,12 +1,10 @@
 # pictographic
 
-Binarizes images and extracts each drawing's medial axis from the original
-ink mask.
+Binarizes images and recovers the pen strokes a drawing was made of.
 
-Each input image produces one output, `<name>.svg`: the drawing's axis as cubic
-Bezier curves, smooth along every stroke while junctions meet and corners come
-to a point, stroked at the ink's own width with round caps and joins over a
-white background.
+Each input image produces one output, `<name>.svg`: one cubic Bezier path per
+stroke, smooth along its length while corners come to a point, stroked at the
+ink's own width with round caps and joins over a white background.
 
 ## Install
 
@@ -30,6 +28,59 @@ that for you.
 
 ## Run
 
+Binarize every challenge 1 image, trace each foreground contour, collapse its
+pixel staircases, preserve its corners, and fit the smooth runs as cubic Bezier
+curves:
+
+```bash
+uv run challenge_1
+```
+
+Each input produces `<name>-binarize.png`, `<name>-edges.png`, the color debug
+image `<name>-lines.png`, `<name>-vector.svg`, and `<name>-filled.svg`. You can
+also process a different image or directory:
+
+The edge image is the extracted raster edge map, before smoothing. The colored
+line image, vector preview, and compact filled SVG come from one shared set of
+fitted contours. The vector output marks the Bezier anchors over each colored
+contour. The filled output puts every closed contour in one compound path and
+fills alternate regions using SVG's even-odd rule.
+
+The binary and edge images use black foreground pixels on white. The colored
+preview flattens the Beziers to within a quarter pixel and draws them
+anti-aliased. The lines image uses one random color per contour.
+
+```bash
+uv run challenge_1 --input input/challenge_1/cabinet.png --output output/challenge_1
+uv run challenge_1 -i path/to/images -o path/to/output
+```
+
+Otsu thresholding is used by default. Provide a fixed threshold from 0 to 255
+when needed:
+
+```bash
+uv run challenge_1 --threshold 128
+```
+
+The tracer follows VTracer's spline stages. A four-connected boundary walker
+traces foreground components and enclosed holes as straight runs with opposite
+winding. It then removes one-pixel staircase turns, simplifies the remaining
+lattice path, detects corners, and repeatedly subdivides long smooth segments
+before fitting Beziers. A direction change of 60 degrees or more stays pinned
+as a corner by default:
+
+```bash
+uv run challenge_1 --angle-threshold 75
+```
+
+Bezier fitting may deviate by at most 1.5 pixels from the smoothed contour by
+default. A smaller tolerance follows it more closely and usually creates more
+curves; a larger tolerance produces a simpler result:
+
+```bash
+uv run challenge_1 --smooth-tolerance 1
+```
+
 Process every image under `input/skeletonize` and write results to
 `output/skeletonize` (this is the default when no arguments are given):
 
@@ -40,39 +91,39 @@ uv run skeletonize
 Process a single file, output going to a chosen directory:
 
 ```bash
-uv run skeletonize input/skeletonize/letter_K.png output/skeletonize
+uv run skeletonize --input input/skeletonize/letter_K.png --output output/skeletonize
 ```
 
-Axis samples are spaced 10 pixels apart by default. Choose another spacing with
+Stroke samples are spaced 50 pixels apart by default. Choose another spacing with
 `--sample-spacing`:
 
 ```bash
-uv run skeletonize --sample-spacing 5 input/skeletonize/letter_K.png output/skeletonize
+uv run skeletonize -s 5 -i input/skeletonize/letter_K.png -o output/skeletonize
 ```
 
-Each intersection is cut back to the transition point on every branch leaving
-it, and falls back to its maximal-inscribed circle where a branch has no
-transition point; corners are cut between the pair of transition points that
-bound them.
+A junction is where strokes overlap, not a hole to be patched: the drawing's
+medial axis is used only to find where the strokes meet and which branches carry
+the same one. Each stroke then claims the ink around the branches it runs along,
+junctions included, so two strokes crossing simply share the ink there — and its
+own centre line is the medial axis of that, which no longer has the crossing in
+it to bend around.
 
-Where two strokes leave one shared cap, as in the middle of a `3`, the axis of
-their overlap hangs off the intersection as a branch of its own. It is not a
-stroke anyone drew — stroking it lays a flat bar over what the drawing flares
-into a wedge — so it is recognised by its disc staying swollen for its whole
-length, and unfolded back into the two stroke centre lines it was the average
-of.
+Where two strokes leave one shared cap, as in the middle of a `3`, they overlap
+all the way out to it and both run to the cap. Where one stroke turns a corner,
+its two sides meet at the point their own lines cross, and the stroke keeps that
+point instead of being smoothed back through it.
 
-The curves are stroked at the ink's own width, twice the median
-maximal-inscribed radius of the axis. Override it with `--stroke-width`:
+The curves are stroked at the ink's own width, twice the median distance from
+the axis to the edge of the ink. Override it with `--stroke-width`:
 
 ```bash
-uv run skeletonize --stroke-width 12 input/skeletonize/letter_K.png output/skeletonize
+uv run skeletonize -w 12 -i input/skeletonize/letter_K.png -o output/skeletonize
 ```
 
 Process a different directory into another directory:
 
 ```bash
-uv run skeletonize input/challenge_1 output/challenge_1
+uv run skeletonize --input input/challenge_1 --output output/challenge_1
 ```
 
 You can also run the module directly without the installed script name:
@@ -138,11 +189,19 @@ uv run python
 pyproject.toml              project metadata & dependencies (edit by hand or via `uv add`/`uv remove`)
 uv.lock                      locked dependency versions (committed, don't edit by hand)
 .python-version              pinned Python version for uv
+src/challenge_1/
+  __init__.py                 binarization, contour smoothing, previews, and CLI
+src/pictographic/
+  curves.py                   shared centerline and closed-contour Bézier fitting
+  graph.py                    shared skeleton graph types and tracing
+  svg.py                      shared stroked SVG output
 src/skeletonize/
   __init__.py                CLI entry point (argument parsing, directory walking)
   skeletonize.py              binarize() and process_image() orchestration
-  medial_axis.py              distance-ordered medial-axis thinning
-  graph.py                    graph construction, intersection removal, tangent crossings
+  medial_axis.py              Zhang-Suen medial-axis thinning and the ink distance map
+  graph.py                    axis tracing into edges and junctions
+  strokes.py                  stroke separation at the junctions and per-stroke axes
+  curves.py                   arc-length resampling and Catmull-Rom Bezier fitting
   svg.py                      stroked SVG output
 input/                        source images, organized by challenge
 output/                       generated SVG results

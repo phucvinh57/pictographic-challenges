@@ -1,34 +1,40 @@
 import argparse
+from math import isfinite
 from pathlib import Path
 
 from .skeletonize import process_image
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Binarize an image and extract its medial axis."
     )
     parser.add_argument(
-        "input",
-        nargs="?",
+        "-i",
+        "--input",
         type=Path,
         default=Path("input/skeletonize"),
+        help="image or directory to process (default: input/skeletonize)",
     )
     parser.add_argument(
-        "output",
-        nargs="?",
+        "-o",
+        "--output",
         type=Path,
         default=Path("output/skeletonize"),
+        help="output directory (default: output/skeletonize)",
     )
     parser.add_argument(
+        "-s",
         "--sample-spacing",
         type=float,
         default=50,
         metavar="PIXELS",
-        help="arc-length spacing between axis samples (default: 10)",
+        help="arc-length spacing between axis samples (default: 50)",
     )
     parser.add_argument(
+        "-w",
         "--stroke-width",
         type=float,
         default=None,
@@ -40,16 +46,34 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if args.input.is_dir():
-        for image_path in sorted(args.input.rglob("*")):
-            if image_path.suffix.lower() not in IMAGE_SUFFIXES:
-                continue
-            relative_dir = image_path.parent.relative_to(args.input)
-            out_dir = args.output / relative_dir
-            process_image(
-                image_path, out_dir, args.sample_spacing, args.stroke_width
-            )
+    if not isfinite(args.sample_spacing) or args.sample_spacing <= 0:
+        parser.error("--sample-spacing must be positive")
+    if args.stroke_width is not None and (
+        not isfinite(args.stroke_width) or args.stroke_width <= 0
+    ):
+        parser.error("--stroke-width must be positive")
+
+    input_is_dir = args.input.is_dir()
+    image_paths: list[Path]
+    if input_is_dir:
+        image_paths = [
+            path
+            for path in sorted(args.input.rglob("*"))
+            if path.is_file() and path.suffix.lower() in IMAGE_SUFFIXES
+        ]
+        if not image_paths:
+            parser.error(f"no supported images found in {args.input}")
+    elif not args.input.is_file():
+        parser.error(f"input does not exist or is not a file: {args.input}")
+    elif args.input.suffix.lower() not in IMAGE_SUFFIXES:
+        parser.error(f"unsupported image type: {args.input.suffix}")
     else:
+        image_paths = [args.input]
+
+    input_root = args.input if input_is_dir else args.input.parent
+    for image_path in image_paths:
+        relative_dir = image_path.relative_to(input_root).parent
+        output_dir = args.output / relative_dir
         process_image(
-            args.input, args.output, args.sample_spacing, args.stroke_width
+            image_path, output_dir, args.sample_spacing, args.stroke_width
         )
