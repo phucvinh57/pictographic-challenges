@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from itertools import pairwise
-from math import atan2, ceil, degrees, hypot, radians
+from math import atan2, ceil, degrees, hypot
 
 AxisPoint = tuple[float, float]
 
@@ -293,31 +293,66 @@ def subdivide_closed_path(
     return (*path, path[0]), (*corners, corners[0])
 
 
-def _splice_flags(
-    points: list[AxisPoint], corners: Sequence[bool], threshold: float
-) -> list[bool]:
-    flags = list(corners)
-    increasing: bool | None = None
-    displacement = 0.0
-    for index, point in enumerate(points):
-        angle = _turn(points[index - 1], point, points[(index + 1) % len(points)])
-        current_increasing = angle >= 0
-        if increasing is None:
-            increasing = current_increasing
-        elif increasing != current_increasing:
-            flags[index] = True
-            increasing = current_increasing
-        displacement += angle
-        if abs(displacement) >= radians(threshold):
-            flags[index] = True
-        if flags[index]:
-            displacement = 0.0
-    return flags
-
-
 def _unit(vector: AxisPoint) -> AxisPoint:
     length = hypot(*vector)
     return (vector[0] / length, vector[1] / length) if length else (0.0, 0.0)
+
+
+def _cut_indices(points: Sequence[AxisPoint], corners: Sequence[bool]) -> list[int]:
+    """Pick where the loop is broken into sections: its corners, and no more."""
+    cuts = [index for index, corner in enumerate(corners) if corner]
+    if not cuts:
+        return [0, len(points) // 2]
+    if len(cuts) == 1:
+        cuts.append((cuts[0] + len(points) // 2) % len(points))
+        cuts.sort()
+    return cuts
+
+
+def _walk(
+    points: Sequence[AxisPoint], index: int, step: int, span: float
+) -> AxisPoint:
+    size = len(points)
+    current = index
+    travelled = 0.0
+    for _ in range(size - 1):
+        following = (current + step) % size
+        travelled += hypot(
+            points[following][0] - points[current][0],
+            points[following][1] - points[current][1],
+        )
+        current = following
+        if travelled >= span:
+            break
+    return points[current]
+
+
+def _cut_tangents(
+    points: Sequence[AxisPoint],
+    corners: Sequence[bool],
+    cuts: Sequence[int],
+    span: float,
+) -> dict[int, tuple[AxisPoint, AxisPoint]]:
+    """Give each cut the direction the path arrives and leaves along.
+
+    A corner turns, so each side is measured on its own. Anywhere else the two
+    are one centred estimate, which is what keeps the sections' tangents equal
+    and the join between them smooth.
+    """
+    tangents = {}
+    for index in cuts:
+        point = points[index]
+        before = _walk(points, index, -1, span)
+        after = _walk(points, index, 1, span)
+        if corners[index]:
+            incoming = _unit((point[0] - before[0], point[1] - before[1]))
+            outgoing = _unit((after[0] - point[0], after[1] - point[1]))
+        else:
+            incoming = outgoing = _unit(
+                (after[0] - before[0], after[1] - before[1])
+            )
+        tangents[index] = (incoming, outgoing)
+    return tangents
 
 
 def _evaluate(curve: BezierCurve, parameter: float) -> AxisPoint:
@@ -487,21 +522,15 @@ def fit_closed_contour(
     points: Sequence[AxisPoint],
     corners: Sequence[bool],
     tolerance: float,
-    splice_threshold: float = 45.0,
+    tangent_span: float = 3.0,
 ) -> tuple[BezierCurve, ...]:
     """Fit an adaptive cubic chain around a smoothed closed contour."""
     path = _closed_points(points)
     corner_flags = list(corners[:-1] if len(corners) == len(path) + 1 else corners)
     if len(path) < 3 or len(corner_flags) != len(path):
         return ()
-    splice_flags = _splice_flags(path, corner_flags, splice_threshold)
-    cuts = [index for index, splice in enumerate(splice_flags) if splice]
-    if not cuts:
-        cuts = [0, len(path) // 2]
-    elif len(cuts) == 1:
-        opposite = (cuts[0] + len(path) // 2) % len(path)
-        cuts.append(opposite)
-        cuts.sort()
+    cuts = _cut_indices(path, corner_flags)
+    tangents = _cut_tangents(path, corner_flags, cuts, tangent_span)
     curves = []
     witness_spacing = min(1.0, max(0.25, tolerance))
     for start, end in pairwise([*cuts, cuts[0]]):
@@ -511,23 +540,27 @@ def fit_closed_contour(
             else [*path[start:], *path[: end + 1]]
         )
         dense = _densify(section, witness_spacing)
-        start_tangent = _unit(
-            (dense[1][0] - dense[0][0], dense[1][1] - dense[0][1])
-        )
-        end_tangent = _unit(
-            (dense[-2][0] - dense[-1][0], dense[-2][1] - dense[-1][1])
-        )
+        start_tangent = tangents[start][1]
+        incoming = tangents[end][0]
         curves.extend(
-            _fit_cubics(dense, start_tangent, end_tangent, tolerance * tolerance)
+            _fit_cubics(
+                dense,
+                start_tangent,
+                (-incoming[0], -incoming[1]),
+                tolerance * tolerance,
+            )
         )
-    if curves:
-        first = curves[0]
+    if curves and curves[-1].end != curves[0].start:
         last = curves[-1]
-        curves[0] = BezierCurve(
-            first.start, first.first_control, first.second_control, first.end
+        shift = (
+            curves[0].start[0] - last.end[0],
+            curves[0].start[1] - last.end[1],
         )
         curves[-1] = BezierCurve(
-            last.start, last.first_control, last.second_control, first.start
+            last.start,
+            last.first_control,
+            (last.second_control[0] + shift[0], last.second_control[1] + shift[1]),
+            curves[0].start,
         )
     return tuple(curves)
 

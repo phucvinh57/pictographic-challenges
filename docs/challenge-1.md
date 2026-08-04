@@ -104,19 +104,30 @@ value treats more of the contour as a smooth run.
 
 ## 5. Adaptive cubic Bezier fitting
 
-`fit_closed_contour` divides the loop at preserved corners, curvature-direction
-changes, and accumulated turns. Each section is densified to provide fitting
-witnesses, then `_fit_cubics`:
+`fit_closed_contour` divides the loop at preserved corners and nowhere else, so
+every cut is a place the drawing really does turn. A loop with fewer than two
+corners is opened at two arbitrary points instead, since a closed chain needs
+somewhere to start.
 
-1. estimates endpoint tangents;
+`_cut_tangents` then fixes the direction at each cut before any fitting
+happens. A corner turns, so the two sides are measured separately, each from a
+chord over `tangent_span` pixels of the path. Anywhere else the direction is
+one centred estimate spanning the cut, handed to the sections on both sides, so
+the curves that meet there leave along the same tangent and the join is smooth.
+Measuring over a span rather than a single step also keeps raster quantisation
+out of the estimate.
+
+Each section is densified to provide fitting witnesses, then `_fit_cubics`:
+
+1. takes the endpoint tangents from the cuts;
 2. solves the two cubic control-handle lengths by least squares;
 3. measures the fitted curve against the witness points; and
 4. recursively splits at the largest error until the requested tolerance is
    met.
 
-The final curve is a closed chain of `BezierCurve` values. Adjacent pieces meet
-continuously along smooth runs, while corner cuts allow a deliberate tangent
-break.
+A recursive split shares its tangent between the two halves, so the final chain
+of `BezierCurve` values is smooth everywhere except at the corners, which keep
+their deliberate tangent break.
 
 `--smooth-tolerance` controls the accepted sampled fitting error in pixels. The
 default is 1.5 pixels. A lower value follows the contour more closely and
