@@ -90,12 +90,6 @@ def catmull_rom(
     return tuple(curves)
 
 
-def _cross(first: AxisPoint, second: AxisPoint, third: AxisPoint) -> float:
-    return (second[0] - first[0]) * (third[1] - first[1]) - (
-        third[0] - first[0]
-    ) * (second[1] - first[1])
-
-
 def _closed_points(points: Sequence[AxisPoint]) -> list[AxisPoint]:
     unique = []
     for point in points:
@@ -105,99 +99,6 @@ def _closed_points(points: Sequence[AxisPoint]) -> list[AxisPoint]:
     if len(unique) > 1 and unique[0] == unique[-1]:
         unique.pop()
     return unique
-
-
-def _remove_staircase(points: list[AxisPoint]) -> list[AxisPoint]:
-    if len(points) < 3:
-        return points
-    path = [*points, points[0]]
-    clockwise = sum(
-        start[0] * end[1] - end[0] * start[1]
-        for start, end in pairwise(path)
-    ) > 0
-    result = []
-    for index, point in enumerate(path):
-        if index == 0 or index == len(path) - 1:
-            result.append(point)
-            continue
-        before = path[index - 1]
-        after = path[index + 1]
-        before_length = abs(point[0] - before[0]) + abs(point[1] - before[1])
-        after_length = abs(point[0] - after[0]) + abs(point[1] - after[1])
-        area = _cross(before, point, after)
-        if (
-            before_length != 1
-            and after_length != 1
-            or area != 0
-            and (area > 0) == clockwise
-        ):
-            result.append(point)
-    return result[:-1]
-
-
-def _penalty(first: AxisPoint, point: AxisPoint, last: AxisPoint) -> float:
-    side_a = hypot(first[0] - point[0], first[1] - point[1])
-    side_b = hypot(point[0] - last[0], point[1] - last[1])
-    chord = hypot(last[0] - first[0], last[1] - first[1])
-    if chord == 0:
-        return 0.0
-    semiperimeter = (side_a + side_b + chord) / 2
-    area_squared = max(
-        0.0,
-        semiperimeter
-        * (semiperimeter - side_a)
-        * (semiperimeter - side_b)
-        * (semiperimeter - chord),
-    )
-    return area_squared / chord
-
-
-def _limit_penalties(points: list[AxisPoint], tolerance: float = 1.0) -> list[AxisPoint]:
-    if len(points) < 3:
-        return points
-    path = [*points, points[0]]
-    result = [path[0]]
-    last = 0
-    for index in range(1, len(path)):
-        if index == last + 1:
-            continue
-        maximum = max(
-            _penalty(path[last], path[middle], path[index])
-            for middle in range(last + 1, index)
-        )
-        if maximum >= tolerance:
-            last = index - 1
-            result.append(path[last])
-        if index == len(path) - 1:
-            result.append(path[index])
-    reduced = result[:-1] if len(result) > 1 and result[0] == result[-1] else result
-    return reduced if len(reduced) >= 3 else points
-
-
-def _remove_collinear(points: list[AxisPoint]) -> list[AxisPoint]:
-    current = points
-    while len(current) > 3:
-        reduced = [
-            point
-            for index, point in enumerate(current)
-            if abs(_cross(current[index - 1], point, current[(index + 1) % len(current)]))
-            > 1e-9
-        ]
-        if len(reduced) < 3 or len(reduced) == len(current):
-            break
-        current = reduced
-    return current
-
-
-def simplify_staircase(points: Sequence[AxisPoint]) -> tuple[AxisPoint, ...]:
-    """Collapse pixel staircases without applying a raster blur."""
-    path = _closed_points(points)
-    if len(path) < 3:
-        return ()
-    path = _remove_staircase(path)
-    path = _limit_penalties(path)
-    path = _remove_collinear(path)
-    return (*path, path[0]) if len(path) >= 3 else ()
 
 
 def _turn(first: AxisPoint, point: AxisPoint, last: AxisPoint) -> float:
@@ -563,16 +464,6 @@ def fit_closed_contour(
             curves[0].start,
         )
     return tuple(curves)
-
-
-def smooth_closed_contour(
-    points: Sequence[AxisPoint],
-    corner_threshold: float,
-    tolerance: float,
-) -> tuple[BezierCurve, ...]:
-    simplified = simplify_staircase(points)
-    smoothed, corners = subdivide_closed_path(simplified, corner_threshold)
-    return fit_closed_contour(smoothed, corners, tolerance)
 
 
 def _curve_flatness(curve: BezierCurve) -> float:

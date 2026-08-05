@@ -201,7 +201,11 @@ pyproject.toml              project metadata & dependencies (edit by hand or via
 uv.lock                      locked dependency versions (committed, don't edit by hand)
 .python-version              pinned Python version for uv
 src/challenge_1/
-  __init__.py                 binarization, contour smoothing, previews, and CLI
+  __init__.py                 public API exports
+  cli.py                      CLI parsing, validation, and image discovery
+  contours.py                 boundary tracing, cleanup, and curve fitting
+  pipeline.py                 one-image processing and output paths
+  raster.py                   thresholding and contour preview drawing
 src/pictographic/
   curves.py                   shared centerline and closed-contour Bézier fitting
   graph.py                    shared skeleton graph types and tracing

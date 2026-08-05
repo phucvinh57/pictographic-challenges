@@ -63,7 +63,7 @@ The result is written unchanged as `<stem>-1-binarize.png`.
 
 ## 3. Closed contour tracing
 
-`foreground_contours` builds the shape directly from connected components in
+`extract_contours` builds the shape directly from connected components in
 the binary image:
 
 1. Black pixels are labeled with four-connectivity. Every black component is
@@ -81,7 +81,7 @@ survive the conversion.
 ## 4. Staircase removal and corner-aware smoothing
 
 Each raw contour first passes through `simplify_staircase` in
-`pictographic.curves`, which:
+`challenge_1.contours`, which:
 
 - removes one-pixel zigzags caused by the square raster grid;
 - limits how far a collapsed run may move from the original path; and
@@ -192,12 +192,12 @@ uv run challenge_1 \
 
 | Function/module | Responsibility |
 |---|---|
-| `challenge_1.main` | CLI validation, recursive discovery, and output naming |
-| `challenge_1.process_image` | Runs the stages for one image and writes all four outputs |
-| `challenge_1.binarize` | Otsu or fixed thresholding |
-| `challenge_1.foreground_contours` | Connected-component discovery and closed boundary tracing |
-| `challenge_1.simplify_contours` | Removes pixel staircases and redundant contour points |
-| `challenge_1.draw_contours` | Raster debug view of the simplified contours |
+| `challenge_1.cli` | CLI validation and recursive discovery |
+| `challenge_1.pipeline` | Runs the stages and determines output paths |
+| `challenge_1.raster` | Otsu or fixed thresholding and raster debug drawing |
+| `challenge_1.contours.extract_contours` | Connected-component discovery and closed boundary tracing |
+| `challenge_1.contours.remove_staircases` | Removes pixel staircases and redundant contour points |
+| `challenge_1.contours.smooth_contours` | Subdivides and fits the cleaned contours |
 | `pictographic.curves.subdivide_closed_path` | Corner preservation and smooth-run subdivision |
 | `pictographic.curves.fit_closed_contour` | Adaptive cubic Bezier fitting |
 | `pictographic.svg.bezier_svg` | Colored vector debug view and anchor markers |
