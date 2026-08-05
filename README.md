@@ -91,6 +91,14 @@ Process every image under `input/skeletonize` and write results to
 uv run skeletonize
 ```
 
+Each input produces `<name>.svg` and two debug images.
+`<name>-skeleton.png` is the whole-drawing medial axis on its own, black on
+white. `<name>-debug.png` is what the strokes were solved out of: the ink greyed
+back, that same axis over it, and the axis pixels each cut claimed painted in —
+red for a junction, orange for a corner's fan. A junction's focus is ringed at
+the disc it was cut with, the rails it unfolded an overlap into are green, and
+the smoothed strokes go on top, one color each.
+
 Process a single file, output going to a chosen directory:
 
 ```bash
@@ -205,6 +213,7 @@ src/skeletonize/
   graph.py                    axis tracing into edges and junctions
   strokes.py                  stroke separation at the junctions and per-stroke axes
   curves.py                   arc-length resampling and Catmull-Rom Bezier fitting
+  debug.py                    the skeleton and solved-stroke debug images
   svg.py                      stroked SVG output
 input/                        source images, organized by challenge
 output/                       generated SVG results

@@ -105,7 +105,13 @@ own, so the paths are laid over an opaque white rectangle.
 
 `challenge_1` provides the standalone challenge 1 raster pipeline, simplified
 contour debug output, and vector output.
-`skeletonize.py::process_image` writes one file, `<stem>.svg`.
+`skeletonize.py::process_image` writes `<stem>.svg` and two debug images from
+`debug.py`: `<stem>-skeleton.png` is `skeleton_image`, the whole-drawing medial
+axis on its own, black on white; `<stem>-debug.png` is `debug_image`, the ink
+greyed back with that axis over it, the pixels each cut claimed painted in (red
+for a junction, orange for a corner's fan), every junction's focus ringed at its
+disc, its unfolded rails in green, and the smoothed strokes on top, one color
+each.
 
 Binary images use ink = 0 (black) and background = 255 (white).
 
