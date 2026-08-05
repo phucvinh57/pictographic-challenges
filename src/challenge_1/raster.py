@@ -3,21 +3,32 @@ from random import randint
 import cv2
 import numpy as np
 
-from pictographic.curves import AxisPoint
+
+def grayscale_on_white(image: np.ndarray) -> np.ndarray:
+    """Convert an OpenCV image to grayscale, compositing alpha onto white."""
+    if image.ndim == 2:
+        return image
+
+    if image.ndim != 3 or image.shape[2] not in (3, 4):
+        raise ValueError(f"Unsupported image shape: {image.shape}")
+
+    if image.shape[2] == 3:
+        return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+    color = image[:, :, :3].astype(np.float64)
+    alpha = image[:, :, 3:4].astype(np.float64) / 255.0
+    composited = color * alpha + 255.0 * (1.0 - alpha)
+    composited = np.rint(composited).astype(np.uint8)
+    return cv2.cvtColor(composited, cv2.COLOR_BGR2GRAY)
 
 
 def threshold_level(gray: np.ndarray, threshold: int | None) -> float:
-    if threshold is not None:
-        return float(threshold)
-    level, _ = cv2.threshold(
-        gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
-    )
+    flags = cv2.THRESH_BINARY
+    if threshold is None:
+        threshold = 0
+        flags |= cv2.THRESH_OTSU
+    level, _ = cv2.threshold(gray, threshold, 255, flags)
     return float(level)
-
-
-def binarize(gray: np.ndarray, level: float) -> np.ndarray:
-    _, binary = cv2.threshold(gray, level, 255, cv2.THRESH_BINARY)
-    return binary
 
 
 def random_contour_colors(count: int) -> tuple[str, ...]:
@@ -33,27 +44,3 @@ def random_contour_colors(count: int) -> tuple[str, ...]:
         used.add(color)
         colors.append(color)
     return tuple(colors)
-
-
-def _bgr(color: str) -> tuple[int, int, int]:
-    return int(color[5:7], 16), int(color[3:5], 16), int(color[1:3], 16)
-
-
-def draw_contours(
-    shape: tuple[int, int],
-    contours: tuple[tuple[AxisPoint, ...], ...],
-    colors: tuple[str, ...],
-) -> np.ndarray:
-    image = np.full((*shape, 3), 255, dtype=np.uint8)
-    for contour, color in zip(contours, colors, strict=True):
-        points = np.rint(np.asarray(contour) * 256).astype(np.int32)
-        cv2.polylines(
-            image,
-            [points],
-            True,
-            _bgr(color),
-            1,
-            cv2.LINE_AA,
-            shift=8,
-        )
-    return image

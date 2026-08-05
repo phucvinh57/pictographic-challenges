@@ -7,7 +7,7 @@ stroke, smooth along its length while corners come to a point, stroked at the
 ink's own width with round caps and joins over a white background.
 
 For a stage-by-stage explanation of the outline vectorizer, see
-[Challenge 1: raster outline to SVG](docs/challenge-1.md).
+[Challenge 1: raster outline to SVG](docs/challenge_1.md).
 
 ## Install
 
@@ -31,27 +31,21 @@ that for you.
 
 ## Run
 
-Binarize every challenge 1 image, trace each foreground contour, collapse its
-pixel staircases, preserve its corners, and fit the smooth runs as cubic Bezier
+Threshold every challenge 1 image, trace each ink boundary, collapse its pixel
+staircases, preserve its corners, and fit the smooth runs as cubic Bezier
 curves:
 
 ```bash
 uv run challenge_1
 ```
 
-Each input produces `<name>-1-binarize.png`, the color debug image
-`<name>-2-contours.png`, `<name>-vector.svg`, and `<name>-filled.svg`. You can
-also process a different image or directory:
-
-The contour image shows the closed boundaries extracted from the binary image
-after pixel staircases and redundant points are removed. The vector preview and
-compact filled SVG come from the fitted contours. The vector output marks the
-Bezier anchors over each colored contour. The filled output puts every closed
+Each input produces `<name>-vector.svg` and `<name>-filled.svg`, both from the
+same fitted contours. The vector output is a preview: one random color per
+contour, with the Bezier anchors marked. The filled output puts every closed
 contour in one compound path and fills alternate regions using SVG's even-odd
-rule.
+rule, so enclosed holes come out as holes.
 
-The binary image uses black foreground pixels on white. The contour debug image
-uses one random color per contour.
+You can also process a different image or directory:
 
 ```bash
 uv run challenge_1 --input input/challenge_1/cabinet.png --output output/challenge_1
@@ -65,18 +59,18 @@ when needed:
 uv run challenge_1 --threshold 128
 ```
 
-The tracer follows VTracer's spline stages. A four-connected boundary walker
-traces foreground components and enclosed holes as straight runs with opposite
-winding. It then removes one-pixel staircase turns, simplifies the remaining
-lattice path, detects corners, and repeatedly subdivides long smooth segments
-before fitting Beziers. A direction change of 60 degrees or more stays pinned
-as a corner by default:
+The threshold only picks a level; the contours are then traced through the
+original grayscale pixels with marching squares, so antialiased edges keep their
+subpixel position instead of becoming staircases. Redundant points are dropped,
+flat spans are measured and kept as exact lines, and the rest is fitted with
+cubic Beziers. A direction change of 60 degrees or more stays pinned as a corner
+by default:
 
 ```bash
 uv run challenge_1 --angle-threshold 75
 ```
 
-Bezier fitting may deviate by at most 1.5 pixels from the smoothed contour by
+Bezier fitting may deviate by at most 0.75 pixels from the smoothed contour by
 default. A smaller tolerance follows it more closely and usually creates more
 curves; a larger tolerance produces a simpler result:
 
@@ -205,7 +199,7 @@ src/challenge_1/
   cli.py                      CLI parsing, validation, and image discovery
   contours.py                 boundary tracing, cleanup, and curve fitting
   pipeline.py                 one-image processing and output paths
-  raster.py                   thresholding and contour preview drawing
+  raster.py                   threshold level selection and debug colors
 src/pictographic/
   curves.py                   shared centerline and closed-contour Bézier fitting
   graph.py                    shared skeleton graph types and tracing

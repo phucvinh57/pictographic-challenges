@@ -12,8 +12,8 @@ DEFAULT_SMOOTH_TOLERANCE = 0.75
 def main() -> None:
     parser = argparse.ArgumentParser(
         description=(
-            "Binarize challenge images, remove pixel staircases from their "
-            "contours, preserve corners, and fit smooth cubic Bezier curves."
+            "Trace challenge image contours, remove their pixel staircases, "
+            "preserve corners, and fit smooth cubic Bezier curves."
         )
     )
     parser.add_argument(
@@ -21,7 +21,7 @@ def main() -> None:
         "--input",
         type=Path,
         default=Path("input/challenge_1"),
-        help="image or directory to binarize (default: input/challenge_1)",
+        help="image or directory to vectorize (default: input/challenge_1)",
     )
     parser.add_argument(
         "-o",

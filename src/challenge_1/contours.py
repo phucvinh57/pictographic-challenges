@@ -44,9 +44,7 @@ def _edge(side: str, row: int, column: int) -> tuple[str, int, int]:
 def _crossing(field: np.ndarray, edge: tuple[str, int, int]) -> AxisPoint:
     kind, row, column = edge
     first = float(field[row, column])
-    second = float(
-        field[row, column + 1] if kind == "h" else field[row + 1, column]
-    )
+    second = float(field[row, column + 1] if kind == "h" else field[row + 1, column])
     fraction = first / (first - second)
     return (
         (column + fraction - 0.5, row - 0.5)
@@ -55,65 +53,10 @@ def _crossing(field: np.ndarray, edge: tuple[str, int, int]) -> AxisPoint:
     )
 
 
-def extract_contours(
-    gray: np.ndarray, level: float
-) -> tuple[tuple[AxisPoint, ...], ...]:
-    """Trace the ink's edge where the image crosses the threshold, not around it.
-
-    The edge of a drawing sits wherever the pixels it fades across are half
-    covered, which is hardly ever on a pixel's own boundary. Reading that off
-    the greys puts it within a fraction of a pixel, and a stick's cap comes out
-    the arc it was drawn as rather than the dozen steps a binary image climbs it
-    in.
-    """
-    field = np.pad(
-        (level + 0.5) - gray.astype(np.float64), 1, constant_values=-1.0
-    )
-    inside = field > 0
-    cases = (
-        inside[:-1, :-1].astype(np.uint8)
-        | inside[:-1, 1:].astype(np.uint8) << 1
-        | inside[1:, 1:].astype(np.uint8) << 2
-        | inside[1:, :-1].astype(np.uint8) << 3
-    )
-    following: dict[tuple[str, int, int], tuple[str, int, int]] = {}
-    for row, column in zip(*np.nonzero((cases > 0) & (cases < 15))):
-        case = int(cases[row, column])
-        if case in (5, 10):
-            middle = (
-                field[row, column]
-                + field[row, column + 1]
-                + field[row + 1, column]
-                + field[row + 1, column + 1]
-            )
-            pairs = _SADDLES[case, bool(middle > 0)]
-        else:
-            pairs = _SEGMENTS[case]
-        for start, end in pairs:
-            following[_edge(start, int(row), int(column))] = _edge(
-                end, int(row), int(column)
-            )
-
-    contours = []
-    walked = set()
-    for start in following:
-        if start in walked:
-            continue
-        loop = []
-        edge = start
-        while edge not in walked and edge in following:
-            walked.add(edge)
-            loop.append(_crossing(field, edge))
-            edge = following[edge]
-        if len(loop) >= 4:
-            contours.append(tuple(loop))
-    return tuple(contours)
-
-
 def _cross(first: AxisPoint, second: AxisPoint, third: AxisPoint) -> float:
-    return (second[0] - first[0]) * (third[1] - first[1]) - (
-        third[0] - first[0]
-    ) * (second[1] - first[1])
+    return (second[0] - first[0]) * (third[1] - first[1]) - (third[0] - first[0]) * (
+        second[1] - first[1]
+    )
 
 
 def _remove_duplicated_points(points: Sequence[AxisPoint]) -> list[AxisPoint]:
@@ -144,9 +87,7 @@ def _penalty(first: AxisPoint, point: AxisPoint, last: AxisPoint) -> float:
     return area_squared / chord
 
 
-def _limit_penalties(
-    points: list[AxisPoint], tolerance: float = 0.25
-) -> list[int]:
+def _limit_penalties(points: list[AxisPoint], tolerance: float = 0.25) -> list[int]:
     if len(points) < 3:
         return list(range(len(points)))
     path = [*points, points[0]]
@@ -208,16 +149,6 @@ def _bend(first: AxisPoint, point: AxisPoint, last: AxisPoint) -> float:
 
 
 def _breaks(polygon: list[AxisPoint], span: float, angle: float) -> list[bool]:
-    """Say where the polygon turns away all at once rather than keeps turning.
-
-    A corner turns the whole way within a step or two, whether it is one vertex
-    or the short chamfer antialiasing leaves of one, while a curve keeps turning
-    the same way for as long as it runs. So the turn either side of a vertex is
-    gathered over a stretch the size of the tightest corner, and measured
-    against the length of boundary it took to turn that far: a corner turns
-    faster than the sharpest curve worth keeping, whether it turns at one vertex
-    between two long sides or over a chamfer a few pixels wide.
-    """
     size = len(polygon)
     turns = [
         _bend(polygon[index - 1], point, polygon[(index + 1) % size])
@@ -264,15 +195,6 @@ def _runs_straight(
     tolerance: float,
     radius: float,
 ) -> bool:
-    """Say whether the boundary between two vertices is a line or a shallow arc.
-
-    However far the boundary bows off a line of its own length, that is an arc
-    of some radius, and a line is one only where that radius comes out flatter
-    than any curve worth drawing. A pixel is nothing over the length of a drawn
-    side, which is why the bow is read against the length rather than on its own,
-    and it is the whole of the cap on a stick, which is why the cap does not come
-    out as the two or three lines its own chords would make of it.
-    """
     size = len(points)
     first, last = points[start], points[end]
     length = hypot(last[0] - first[0], last[1] - first[1])
@@ -280,8 +202,7 @@ def _runs_straight(
         return False
     stop = end if end > start else end + size
     bow = max(
-        _offset(first, last, points[index % size])
-        for index in range(start, stop + 1)
+        _offset(first, last, points[index % size]) for index in range(start, stop + 1)
     )
     return bow <= tolerance and length * length >= 8 * bow * radius
 
@@ -296,20 +217,6 @@ def _straight_runs(
     angle: float,
     dominant_length: float,
 ) -> tuple[list[int], tuple[bool, ...]]:
-    """Find the stretches of the polygon the boundary really runs straight along.
-
-    A line runs from one break to the next, so those are the only places one can
-    start or stop, and `_runs_straight` says whether the boundary between them
-    is one. Whatever vertices the approximation left along the way are dropped,
-    or a line the boundary wandered off by a third of a pixel in the middle of
-    would come out as two lines that miss being one by a degree.
-
-    A stretch already longer than anything a curve is approximated by ends
-    wherever it ends, break or no break: a corner rounded off by a fillet
-    broader than the sharpest curve worth keeping still has the line stop at it.
-    Everywhere else the breaks are what keep the long chords a gentle curve is
-    approximated by from passing for lines and facetting it.
-    """
     polygon = [points[index] for index in indices]
     breaks = _breaks(polygon, span, angle)
     size = len(indices)
@@ -355,6 +262,51 @@ def _straight_runs(
     return kept, tuple(flags)
 
 
+def extract_contours(
+    gray_img: np.ndarray, level: float
+) -> tuple[tuple[AxisPoint, ...], ...]:
+    field = np.pad((level + 0.5) - gray_img.astype(np.float64), 1, constant_values=-1.0)
+    inside = field > 0
+    cases = (
+        inside[:-1, :-1].astype(np.uint8)
+        | inside[:-1, 1:].astype(np.uint8) << 1
+        | inside[1:, 1:].astype(np.uint8) << 2
+        | inside[1:, :-1].astype(np.uint8) << 3
+    )
+    following: dict[tuple[str, int, int], tuple[str, int, int]] = {}
+    for row, column in zip(*np.nonzero((cases > 0) & (cases < 15))):
+        case = int(cases[row, column])
+        if case in (5, 10):
+            middle = (
+                field[row, column]
+                + field[row, column + 1]
+                + field[row + 1, column]
+                + field[row + 1, column + 1]
+            )
+            pairs = _SADDLES[case, bool(middle > 0)]
+        else:
+            pairs = _SEGMENTS[case]
+        for start, end in pairs:
+            following[_edge(start, int(row), int(column))] = _edge(
+                end, int(row), int(column)
+            )
+
+    contours = []
+    walked = set()
+    for start in following:
+        if start in walked:
+            continue
+        loop = []
+        edge = start
+        while edge not in walked and edge in following:
+            walked.add(edge)
+            loop.append(_crossing(field, edge))
+            edge = following[edge]
+        if len(loop) >= 4:
+            contours.append(tuple(loop))
+    return tuple(contours)
+
+
 def preprocess_contours(
     contours: tuple[tuple[AxisPoint, ...], ...],
     simplify_tolerance: float = 0.25,
@@ -371,9 +323,7 @@ def preprocess_contours(
         path = _remove_duplicated_points(contour)
         if len(path) < 3:
             continue
-        indices = _remove_collinear(
-            path, _limit_penalties(path, simplify_tolerance)
-        )
+        indices = _remove_collinear(path, _limit_penalties(path, simplify_tolerance))
 
         if len(indices) >= 3:
             indices, straight = _straight_runs(
@@ -411,6 +361,5 @@ def curve_anchors(
     contours: tuple[tuple[BezierCurve, ...], ...],
 ) -> tuple[tuple[AxisPoint, ...], ...]:
     return tuple(
-        (curves[0].start, *(curve.end for curve in curves))
-        for curves in contours
+        (curves[0].start, *(curve.end for curve in curves)) for curves in contours
     )
