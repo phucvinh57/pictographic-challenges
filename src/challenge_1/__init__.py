@@ -7,11 +7,16 @@ from .cli import (
 from .contours import (
     curve_anchors,
     extract_contours,
-    process_staircases,
+    preprocess_contours,
     smooth_contours,
 )
 from .pipeline import output_paths_for, process_image
-from .raster import binarize, draw_contours, random_contour_colors
+from .raster import (
+    binarize,
+    draw_contours,
+    random_contour_colors,
+    threshold_level,
+)
 
 __all__ = (
     "DEFAULT_ANGLE_THRESHOLD",
@@ -23,8 +28,9 @@ __all__ = (
     "extract_contours",
     "main",
     "output_paths_for",
+    "preprocess_contours",
     "process_image",
     "random_contour_colors",
-    "process_staircases",
     "smooth_contours",
+    "threshold_level",
 )

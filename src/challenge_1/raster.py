@@ -6,12 +6,17 @@ import numpy as np
 from pictographic.curves import AxisPoint
 
 
-def binarize(gray: np.ndarray, threshold: int | None) -> np.ndarray:
-    threshold_type = cv2.THRESH_BINARY
-    if threshold is None:
-        threshold = 0
-        threshold_type += cv2.THRESH_OTSU
-    _, binary = cv2.threshold(gray, threshold, 255, threshold_type)
+def threshold_level(gray: np.ndarray, threshold: int | None) -> float:
+    if threshold is not None:
+        return float(threshold)
+    level, _ = cv2.threshold(
+        gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
+    )
+    return float(level)
+
+
+def binarize(gray: np.ndarray, level: float) -> np.ndarray:
+    _, binary = cv2.threshold(gray, level, 255, cv2.THRESH_BINARY)
     return binary
 
 

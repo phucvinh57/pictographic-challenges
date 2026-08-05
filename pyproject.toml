@@ -14,14 +14,14 @@ dependencies = [
 
 [project.scripts]
 challenge_1 = "challenge_1:main"
-skeletonize = "skeletonize:main"
+challenge_2 = "challenge_2:main"
 
 [build-system]
 requires = ["uv_build>=0.12.0,<0.13.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-module-name = ["challenge_1", "pictographic", "skeletonize"]
+module-name = ["challenge_1", "challenge_2", "pictographic"]
 
 [dependency-groups]
 dev = [

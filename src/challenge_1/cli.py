@@ -6,7 +6,7 @@ from .pipeline import output_paths_for, process_image
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
 DEFAULT_ANGLE_THRESHOLD = 60
-DEFAULT_SMOOTH_TOLERANCE = 1.5
+DEFAULT_SMOOTH_TOLERANCE = 0.75
 
 
 def main() -> None:

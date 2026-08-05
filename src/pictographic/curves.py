@@ -110,88 +110,19 @@ def _turn(first: AxisPoint, point: AxisPoint, last: AxisPoint) -> float:
     )
 
 
-def _corner_flags(points: list[AxisPoint], threshold: float) -> list[bool]:
-    return [
-        abs(degrees(_turn(points[index - 1], point, points[(index + 1) % len(points)])))
-        >= threshold
-        for index, point in enumerate(points)
-    ]
-
-
-def _subdivide(
-    points: list[AxisPoint],
-    corners: list[bool],
-    segment_length: float,
-    outset_ratio: float,
-) -> tuple[list[AxisPoint], list[bool], bool]:
-    smoothed = []
-    new_corners = []
-    done = True
-    size = len(points)
-    for index, point in enumerate(points):
-        following = (index + 1) % size
-        end = points[following]
-        smoothed.append(point)
-        new_corners.append(corners[index])
-        length = hypot(end[0] - point[0], end[1] - point[1])
-        if length <= segment_length:
-            continue
-        previous = (index - 1) % size
-        after = (following + 1) % size
-        previous_length = hypot(
-            points[previous][0] - point[0], points[previous][1] - point[1]
-        )
-        following_length = hypot(
-            points[after][0] - end[0], points[after][1] - end[1]
-        )
-        if previous_length / length >= 2 or following_length / length >= 2:
-            continue
-        if corners[index]:
-            previous = index
-        if corners[following]:
-            after = following
-        if previous == index and after == following:
-            continue
-        outer_midpoint = ((point[0] + end[0]) / 2, (point[1] + end[1]) / 2)
-        inner_midpoint = (
-            (points[previous][0] + points[after][0]) / 2,
-            (points[previous][1] + points[after][1]) / 2,
-        )
-        inserted = (
-            outer_midpoint[0]
-            + (outer_midpoint[0] - inner_midpoint[0]) / outset_ratio,
-            outer_midpoint[1]
-            + (outer_midpoint[1] - inner_midpoint[1]) / outset_ratio,
-        )
-        smoothed.append(inserted)
-        new_corners.append(False)
-        if (
-            hypot(inserted[0] - point[0], inserted[1] - point[1]) > segment_length
-            or hypot(inserted[0] - end[0], inserted[1] - end[1]) > segment_length
-        ):
-            done = False
-    return smoothed, new_corners, done
-
-
-def subdivide_closed_path(
-    points: Sequence[AxisPoint],
-    corner_threshold: float,
-    segment_length: float = 4.0,
-    max_iterations: int = 10,
-    outset_ratio: float = 8.0,
-) -> tuple[tuple[AxisPoint, ...], tuple[bool, ...]]:
-    """Smooth a closed path while keeping detected corners fixed."""
+def corner_flags(
+    points: Sequence[AxisPoint], threshold: float
+) -> tuple[bool, ...]:
+    """Say which of a closed path's vertices the path turns a corner at."""
     path = _closed_points(points)
     if len(path) < 3:
-        return (), ()
-    corners = _corner_flags(path, corner_threshold)
-    for _ in range(max_iterations):
-        path, corners, done = _subdivide(
-            path, corners, segment_length, outset_ratio
-        )
-        if done:
-            break
-    return (*path, path[0]), (*corners, corners[0])
+        return ()
+    flags = [
+        abs(degrees(_turn(path[index - 1], point, path[(index + 1) % len(path)])))
+        >= threshold
+        for index, point in enumerate(path)
+    ]
+    return (*flags, flags[0])
 
 
 def _unit(vector: AxisPoint) -> AxisPoint:
@@ -199,15 +130,29 @@ def _unit(vector: AxisPoint) -> AxisPoint:
     return (vector[0] / length, vector[1] / length) if length else (0.0, 0.0)
 
 
-def _cut_indices(points: Sequence[AxisPoint], corners: Sequence[bool]) -> list[int]:
-    """Pick where the loop is broken into sections: its corners, and no more."""
-    cuts = [index for index, corner in enumerate(corners) if corner]
-    if not cuts:
-        return [0, len(points) // 2]
-    if len(cuts) == 1:
-        cuts.append((cuts[0] + len(points) // 2) % len(points))
-        cuts.sort()
-    return cuts
+def _cut_indices(
+    points: Sequence[AxisPoint],
+    corners: Sequence[bool],
+    straight: Sequence[bool],
+) -> list[int]:
+    """Pick where the loop is broken into sections.
+
+    Its corners, and both ends of every straight run: a straight is a section of
+    its own, so it stays the line it was measured to be, and the curve either
+    side of it starts where the line stops rather than eating into it.
+    """
+    size = len(points)
+    cuts = {index for index, corner in enumerate(corners) if corner}
+    for index, run in enumerate(straight):
+        if run:
+            cuts.update((index, (index + 1) % size))
+    ordered = sorted(cuts)
+    if not ordered:
+        return [0, size // 2]
+    if len(ordered) == 1:
+        ordered.append((ordered[0] + size // 2) % size)
+        ordered.sort()
+    return ordered
 
 
 def _walk(
@@ -231,23 +176,53 @@ def _walk(
 def _cut_tangents(
     points: Sequence[AxisPoint],
     corners: Sequence[bool],
+    straight: Sequence[bool],
     cuts: Sequence[int],
     span: float,
 ) -> dict[int, tuple[AxisPoint, AxisPoint]]:
     """Give each cut the direction the path arrives and leaves along.
 
-    A corner turns, so each side is measured on its own. Anywhere else the two
-    are one centred estimate, which is what keeps the sections' tangents equal
-    and the join between them smooth.
+    A corner turns, so each side is measured on its own. A straight run is its
+    own direction, and where one meets a curve the curve takes it too, so the
+    curve leaves along the line rather than across it. Anywhere else the two are
+    one centred estimate, which is what keeps the sections' tangents equal and
+    the join between them smooth.
     """
     tangents = {}
+    size = len(points)
     for index in cuts:
         point = points[index]
+        arriving = (
+            _unit(
+                (
+                    point[0] - points[index - 1][0],
+                    point[1] - points[index - 1][1],
+                )
+            )
+            if straight[index - 1]
+            else None
+        )
+        leaving = (
+            _unit(
+                (
+                    points[(index + 1) % size][0] - point[0],
+                    points[(index + 1) % size][1] - point[1],
+                )
+            )
+            if straight[index]
+            else None
+        )
         before = _walk(points, index, -1, span)
         after = _walk(points, index, 1, span)
         if corners[index]:
-            incoming = _unit((point[0] - before[0], point[1] - before[1]))
-            outgoing = _unit((after[0] - point[0], after[1] - point[1]))
+            incoming = arriving or _unit(
+                (point[0] - before[0], point[1] - before[1])
+            )
+            outgoing = leaving or _unit(
+                (after[0] - point[0], after[1] - point[1])
+            )
+        elif arriving or leaving:
+            incoming = outgoing = arriving or leaving
         else:
             incoming = outgoing = _unit(
                 (after[0] - before[0], after[1] - before[1])
@@ -419,22 +394,36 @@ def _densify(points: Sequence[AxisPoint], spacing: float) -> tuple[AxisPoint, ..
     return tuple(dense)
 
 
+def _line_curve(start: AxisPoint, end: AxisPoint) -> BezierCurve:
+    return BezierCurve(
+        start,
+        (start[0] + (end[0] - start[0]) / 3, start[1] + (end[1] - start[1]) / 3),
+        (end[0] - (end[0] - start[0]) / 3, end[1] - (end[1] - start[1]) / 3),
+        end,
+    )
+
+
 def fit_closed_contour(
     points: Sequence[AxisPoint],
     corners: Sequence[bool],
+    straight: Sequence[bool],
     tolerance: float,
     tangent_span: float = 3.0,
 ) -> tuple[BezierCurve, ...]:
     """Fit an adaptive cubic chain around a smoothed closed contour."""
     path = _closed_points(points)
     corner_flags = list(corners[:-1] if len(corners) == len(path) + 1 else corners)
-    if len(path) < 3 or len(corner_flags) != len(path):
+    runs = list(straight[: len(path)])
+    if len(path) < 3 or len(corner_flags) != len(path) or len(runs) != len(path):
         return ()
-    cuts = _cut_indices(path, corner_flags)
-    tangents = _cut_tangents(path, corner_flags, cuts, tangent_span)
+    cuts = _cut_indices(path, corner_flags, runs)
+    tangents = _cut_tangents(path, corner_flags, runs, cuts, tangent_span)
     curves = []
     witness_spacing = min(1.0, max(0.25, tolerance))
     for start, end in pairwise([*cuts, cuts[0]]):
+        if runs[start] and end == (start + 1) % len(path):
+            curves.append(_line_curve(path[start], path[end]))
+            continue
         section = (
             path[start : end + 1]
             if start < end

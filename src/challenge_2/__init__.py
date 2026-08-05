@@ -2,7 +2,7 @@ import argparse
 from math import isfinite
 from pathlib import Path
 
-from .skeletonize import process_image
+from .pipeline import process_image
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
 
@@ -15,15 +15,15 @@ def main() -> None:
         "-i",
         "--input",
         type=Path,
-        default=Path("input/skeletonize"),
-        help="image or directory to process (default: input/skeletonize)",
+        default=Path("input/challenge_2"),
+        help="image or directory to process (default: input/challenge_2)",
     )
     parser.add_argument(
         "-o",
         "--output",
         type=Path,
-        default=Path("output/skeletonize"),
-        help="output directory (default: output/skeletonize)",
+        default=Path("output/challenge_2"),
+        help="output directory (default: output/challenge_2)",
     )
     parser.add_argument(
         "-s",

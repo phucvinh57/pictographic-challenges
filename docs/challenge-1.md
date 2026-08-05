@@ -206,7 +206,7 @@ uv run challenge_1 \
 ## Scope and trade-offs
 
 - Challenge 1 vectorizes outlines. It does not infer the original pen
-  centerlines or stroke widths; that is the separate `skeletonize` pipeline.
+  centerlines or stroke widths; that is the separate challenge 2 pipeline.
 - The input should have a reasonably separable dark subject and light
   background. Uneven lighting or light-colored ink may need preprocessing or a
   manually selected threshold.

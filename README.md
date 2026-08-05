@@ -84,11 +84,11 @@ curves; a larger tolerance produces a simpler result:
 uv run challenge_1 --smooth-tolerance 1
 ```
 
-Process every image under `input/skeletonize` and write results to
-`output/skeletonize` (this is the default when no arguments are given):
+Process every challenge 2 image under `input/challenge_2` and write results to
+`output/challenge_2` (this is the default when no arguments are given):
 
 ```bash
-uv run skeletonize
+uv run challenge_2
 ```
 
 Each input produces `<name>.svg` and two debug images.
@@ -102,14 +102,14 @@ the smoothed strokes go on top, one color each.
 Process a single file, output going to a chosen directory:
 
 ```bash
-uv run skeletonize --input input/skeletonize/letter_K.png --output output/skeletonize
+uv run challenge_2 --input input/challenge_2/letter_K.png --output output/challenge_2
 ```
 
 Stroke samples are spaced 50 pixels apart by default. Choose another spacing with
 `--sample-spacing`:
 
 ```bash
-uv run skeletonize -s 5 -i input/skeletonize/letter_K.png -o output/skeletonize
+uv run challenge_2 -s 5 -i input/challenge_2/letter_K.png -o output/challenge_2
 ```
 
 A junction is where strokes overlap, not a hole to be patched: the drawing's
@@ -128,19 +128,19 @@ The curves are stroked at the ink's own width, twice the median distance from
 the axis to the edge of the ink. Override it with `--stroke-width`:
 
 ```bash
-uv run skeletonize -w 12 -i input/skeletonize/letter_K.png -o output/skeletonize
+uv run challenge_2 -w 12 -i input/challenge_2/letter_K.png -o output/challenge_2
 ```
 
 Process a different directory into another directory:
 
 ```bash
-uv run skeletonize --input input/challenge_1 --output output/challenge_1
+uv run challenge_2 --input input/challenge_1 --output output/challenge_1
 ```
 
 You can also run the module directly without the installed script name:
 
 ```bash
-uv run python -m skeletonize
+uv run python -m challenge_2
 ```
 
 ## Managing the project
@@ -210,9 +210,9 @@ src/pictographic/
   curves.py                   shared centerline and closed-contour Bézier fitting
   graph.py                    shared skeleton graph types and tracing
   svg.py                      shared stroked SVG output
-src/skeletonize/
+src/challenge_2/
   __init__.py                CLI entry point (argument parsing, directory walking)
-  skeletonize.py              binarize() and process_image() orchestration
+  pipeline.py                 binarize() and process_image() orchestration
   medial_axis.py              Zhang-Suen medial-axis thinning and the ink distance map
   graph.py                    axis tracing into edges and junctions
   strokes.py                  stroke separation at the junctions and per-stroke axes

@@ -7,10 +7,15 @@ from pictographic.svg import bezier_svg, filled_bezier_svg
 from .contours import (
     curve_anchors,
     extract_contours,
-    process_staircases,
+    preprocess_contours,
     smooth_contours,
 )
-from .raster import binarize, draw_contours, random_contour_colors
+from .raster import (
+    binarize,
+    draw_contours,
+    random_contour_colors,
+    threshold_level,
+)
 
 
 def process_image(
@@ -27,12 +32,15 @@ def process_image(
     if gray is None:
         raise ValueError(f"Could not read image: {input_path}")
 
-    binary = binarize(gray, threshold)
-    contours = process_staircases(extract_contours(binary))
+    level = threshold_level(gray, threshold)
+    binary = binarize(gray, level)
+    contours, straights = preprocess_contours(extract_contours(gray, level))
     contours_debug = draw_contours(
         binary.shape, contours, random_contour_colors(len(contours))
     )
-    curves = smooth_contours(contours, angle_threshold, smooth_tolerance)
+    curves = smooth_contours(
+        contours, straights, angle_threshold, smooth_tolerance
+    )
     colors = random_contour_colors(len(curves))
     vector = bezier_svg(
         binary.shape,

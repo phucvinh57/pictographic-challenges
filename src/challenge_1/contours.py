@@ -1,110 +1,112 @@
 from collections.abc import Sequence
-from itertools import pairwise
-from math import hypot
+from math import atan2, degrees, hypot
 
-import cv2
 import numpy as np
 
 from pictographic.curves import (
     AxisPoint,
     BezierCurve,
+    corner_flags,
     fit_closed_contour,
-    subdivide_closed_path,
 )
 
+_SEGMENTS: dict[int, tuple[tuple[str, str], ...]] = {
+    1: (("L", "T"),),
+    2: (("T", "R"),),
+    3: (("L", "R"),),
+    4: (("R", "B"),),
+    6: (("T", "B"),),
+    7: (("L", "B"),),
+    8: (("B", "L"),),
+    9: (("B", "T"),),
+    11: (("B", "R"),),
+    12: (("R", "L"),),
+    13: (("R", "T"),),
+    14: (("T", "L"),),
+}
+_SADDLES: dict[tuple[int, bool], tuple[tuple[str, str], ...]] = {
+    (5, False): (("L", "T"), ("R", "B")),
+    (5, True): (("R", "T"), ("L", "B")),
+    (10, False): (("T", "R"), ("B", "L")),
+    (10, True): (("T", "L"), ("B", "R")),
+}
 
-def _inside(mask: np.ndarray, point: tuple[int, int]) -> bool:
-    x, y = point
-    return bool(
-        0 <= y < mask.shape[0]
-        and 0 <= x < mask.shape[1]
-        and mask[y, x]
+
+def _edge(side: str, row: int, column: int) -> tuple[str, int, int]:
+    return {
+        "T": ("h", row, column),
+        "B": ("h", row + 1, column),
+        "L": ("v", row, column),
+        "R": ("v", row, column + 1),
+    }[side]
+
+
+def _crossing(field: np.ndarray, edge: tuple[str, int, int]) -> AxisPoint:
+    kind, row, column = edge
+    first = float(field[row, column])
+    second = float(
+        field[row, column + 1] if kind == "h" else field[row + 1, column]
+    )
+    fraction = first / (first - second)
+    return (
+        (column + fraction - 0.5, row - 0.5)
+        if kind == "h"
+        else (column - 0.5, row + fraction - 0.5)
     )
 
 
-def _ahead(point: tuple[int, int], direction: int) -> tuple[int, int]:
-    x, y = point
-    dx, dy = ((0, -1), (1, 0), (0, 1), (-1, 0))[direction]
-    return x + dx, y + dy
+def extract_contours(
+    gray: np.ndarray, level: float
+) -> tuple[tuple[AxisPoint, ...], ...]:
+    """Trace the ink's edge where the image crosses the threshold, not around it.
 
-
-def _side_pixels(
-    point: tuple[int, int], direction: int
-) -> tuple[tuple[int, int], tuple[int, int]]:
-    x, y = point
-    first, second = (
-        ((-1, -1), (0, -1)),
-        ((0, 0), (0, -1)),
-        ((-1, 0), (0, 0)),
-        ((-1, 0), (-1, -1)),
-    )[direction]
-    return (x + first[0], y + first[1]), (x + second[0], y + second[1])
-
-
-def _boundary_start(mask: np.ndarray) -> tuple[int, int] | None:
-    padded = np.pad(mask, 1, mode="constant")
-    interior = (
-        mask
-        & padded[:-2, 1:-1]
-        & padded[2:, 1:-1]
-        & padded[1:-1, :-2]
-        & padded[1:-1, 2:]
+    The edge of a drawing sits wherever the pixels it fades across are half
+    covered, which is hardly ever on a pixel's own boundary. Reading that off
+    the greys puts it within a fraction of a pixel, and a stick's cap comes out
+    the arc it was drawn as rather than the dozen steps a binary image climbs it
+    in.
+    """
+    field = np.pad(
+        (level + 0.5) - gray.astype(np.float64), 1, constant_values=-1.0
     )
-    rows, columns = np.nonzero(mask & ~interior)
-    return (int(columns[0]), int(rows[0])) if len(columns) else None
+    inside = field > 0
+    cases = (
+        inside[:-1, :-1].astype(np.uint8)
+        | inside[:-1, 1:].astype(np.uint8) << 1
+        | inside[1:, 1:].astype(np.uint8) << 2
+        | inside[1:, :-1].astype(np.uint8) << 3
+    )
+    following: dict[tuple[str, int, int], tuple[str, int, int]] = {}
+    for row, column in zip(*np.nonzero((cases > 0) & (cases < 15))):
+        case = int(cases[row, column])
+        if case in (5, 10):
+            middle = (
+                field[row, column]
+                + field[row, column + 1]
+                + field[row + 1, column]
+                + field[row + 1, column + 1]
+            )
+            pairs = _SADDLES[case, bool(middle > 0)]
+        else:
+            pairs = _SEGMENTS[case]
+        for start, end in pairs:
+            following[_edge(start, int(row), int(column))] = _edge(
+                end, int(row), int(column)
+            )
 
-
-def _trace_boundary(mask: np.ndarray, clockwise: bool) -> tuple[AxisPoint, ...]:
-    start = _boundary_start(mask)
-    if start is None:
-        return ()
-    current = previous = before_previous = start
-    length = 0
-    path = [start]
-    directions = (0, 1, 2, 3) if clockwise else (3, 2, 1, 0)
-    while current != start or length == 0:
-        direction: int | None = None
-        while True:
-            following = None
-            for candidate in directions:
-                target = _ahead(current, candidate)
-                if target == previous or target == before_previous:
-                    continue
-                first, second = _side_pixels(current, candidate)
-                if _inside(mask, first) != _inside(mask, second):
-                    following = candidate
-                    break
-            if following is None:
-                raise ValueError("Could not trace a closed foreground boundary")
-            if direction is not None and direction != following:
-                break
-            direction = following
-            before_previous, previous = previous, current
-            current = _ahead(current, following)
-            length += 1
-        path.append(current)
-    return tuple((float(x), float(y)) for x, y in path)
-
-
-def extract_contours(binary: np.ndarray) -> tuple[tuple[AxisPoint, ...], ...]:
     contours = []
-    fields = ((binary < 128, True, False), (binary >= 128, False, True))
-    for field, clockwise, exclude_border in fields:
-        count, labels = cv2.connectedComponents(
-            field.astype(np.uint8), connectivity=4
-        )
-        for label in range(1, count):
-            mask = labels == label
-            if exclude_border and (
-                mask[0].any()
-                or mask[-1].any()
-                or mask[:, 0].any()
-                or mask[:, -1].any()
-            ):
-                continue
-            contour = _trace_boundary(mask, clockwise)
-            if len(contour) >= 4:
-                contours.append(contour)
+    walked = set()
+    for start in following:
+        if start in walked:
+            continue
+        loop = []
+        edge = start
+        while edge not in walked and edge in following:
+            walked.add(edge)
+            loop.append(_crossing(field, edge))
+            edge = following[edge]
+        if len(loop) >= 4:
+            contours.append(tuple(loop))
     return tuple(contours)
 
 
@@ -125,34 +127,6 @@ def _remove_duplicated_points(points: Sequence[AxisPoint]) -> list[AxisPoint]:
     return unique
 
 
-def _remove_staircase(points: list[AxisPoint]) -> list[AxisPoint]:
-    if len(points) < 3:
-        return points
-    path = [*points, points[0]]
-    clockwise = sum(
-        start[0] * end[1] - end[0] * start[1]
-        for start, end in pairwise(path)
-    ) > 0
-    result = []
-    for index, point in enumerate(path):
-        if index == 0 or index == len(path) - 1:
-            result.append(point)
-            continue
-        before = path[index - 1]
-        after = path[index + 1]
-        before_length = abs(point[0] - before[0]) + abs(point[1] - before[1])
-        after_length = abs(point[0] - after[0]) + abs(point[1] - after[1])
-        area = _cross(before, point, after)
-        if (
-            before_length != 1
-            and after_length != 1
-            or area != 0
-            and (area > 0) == clockwise
-        ):
-            result.append(point)
-    return result[:-1]
-
-
 def _penalty(first: AxisPoint, point: AxisPoint, last: AxisPoint) -> float:
     side_a = hypot(first[0] - point[0], first[1] - point[1])
     side_b = hypot(point[0] - last[0], point[1] - last[1])
@@ -171,12 +145,12 @@ def _penalty(first: AxisPoint, point: AxisPoint, last: AxisPoint) -> float:
 
 
 def _limit_penalties(
-    points: list[AxisPoint], tolerance: float = 1.0
-) -> list[AxisPoint]:
+    points: list[AxisPoint], tolerance: float = 0.25
+) -> list[int]:
     if len(points) < 3:
-        return points
+        return list(range(len(points)))
     path = [*points, points[0]]
-    result = [path[0]]
+    result = [0]
     last = 0
     for index in range(1, len(path)):
         if index == last + 1:
@@ -187,20 +161,26 @@ def _limit_penalties(
         )
         if maximum >= tolerance:
             last = index - 1
-            result.append(path[last])
+            result.append(last)
         if index == len(path) - 1:
-            result.append(path[index])
-    reduced = result[:-1] if len(result) > 1 and result[0] == result[-1] else result
-    return reduced if len(reduced) >= 3 else points
+            result.append(index)
+    reduced = result[:-1] if len(result) > 1 else result
+    return reduced if len(reduced) >= 3 else list(range(len(points)))
 
 
-def _remove_collinear(points: list[AxisPoint]) -> list[AxisPoint]:
-    current = points
+def _remove_collinear(points: list[AxisPoint], indices: list[int]) -> list[int]:
+    current = indices
     while len(current) > 3:
         reduced = [
-            point
-            for index, point in enumerate(current)
-            if abs(_cross(current[index - 1], point, current[(index + 1) % len(current)]))
+            index
+            for position, index in enumerate(current)
+            if abs(
+                _cross(
+                    points[current[position - 1]],
+                    points[index],
+                    points[current[(position + 1) % len(current)]],
+                )
+            )
             > 1e-9
         ]
         if len(reduced) < 3 or len(reduced) == len(current):
@@ -208,32 +188,220 @@ def _remove_collinear(points: list[AxisPoint]) -> list[AxisPoint]:
         current = reduced
     return current
 
-def process_staircases(
+
+def _offset(start: AxisPoint, end: AxisPoint, point: AxisPoint) -> float:
+    length = hypot(end[0] - start[0], end[1] - start[1])
+    if length == 0:
+        return hypot(point[0] - start[0], point[1] - start[1])
+    return abs(_cross(start, end, point)) / length
+
+
+def _bend(first: AxisPoint, point: AxisPoint, last: AxisPoint) -> float:
+    incoming = (point[0] - first[0], point[1] - first[1])
+    outgoing = (last[0] - point[0], last[1] - point[1])
+    return degrees(
+        atan2(
+            incoming[0] * outgoing[1] - incoming[1] * outgoing[0],
+            incoming[0] * outgoing[0] + incoming[1] * outgoing[1],
+        )
+    )
+
+
+def _breaks(polygon: list[AxisPoint], span: float, angle: float) -> list[bool]:
+    """Say where the polygon turns away all at once rather than keeps turning.
+
+    A corner turns the whole way within a step or two, whether it is one vertex
+    or the short chamfer antialiasing leaves of one, while a curve keeps turning
+    the same way for as long as it runs. So the turn either side of a vertex is
+    gathered over a stretch the size of the tightest corner, and measured
+    against the length of boundary it took to turn that far: a corner turns
+    faster than the sharpest curve worth keeping, whether it turns at one vertex
+    between two long sides or over a chamfer a few pixels wide.
+    """
+    size = len(polygon)
+    turns = [
+        _bend(polygon[index - 1], point, polygon[(index + 1) % size])
+        for index, point in enumerate(polygon)
+    ]
+    lengths = [
+        hypot(
+            polygon[(index + 1) % size][0] - point[0],
+            polygon[(index + 1) % size][1] - point[1],
+        )
+        for index, point in enumerate(polygon)
+    ]
+
+    def gather(index: int, step: int) -> tuple[float, float, float]:
+        total = 0.0
+        travelled = 0.0
+        current = index
+        for _ in range(size - 1):
+            following = (current + step) % size
+            length = lengths[current if step > 0 else following]
+            if travelled + length > span:
+                break
+            travelled += length
+            total += abs(turns[following])
+            current = following
+        edge = lengths[current if step > 0 else (current - 1) % size]
+        return total, travelled, min(edge / 2, span / 2)
+
+    breaks = []
+    for index in range(size):
+        behind, behind_arc, behind_edge = gather(index, -1)
+        ahead, ahead_arc, ahead_edge = gather(index, 1)
+        total = abs(turns[index]) + behind + ahead
+        arc = behind_arc + ahead_arc + behind_edge + ahead_edge
+        breaks.append(total >= angle and total * span >= angle * arc)
+    return breaks
+
+
+def _runs_straight(
+    points: list[AxisPoint],
+    start: int,
+    end: int,
+    minimum_length: float,
+    tolerance: float,
+    radius: float,
+) -> bool:
+    """Say whether the boundary between two vertices is a line or a shallow arc.
+
+    However far the boundary bows off a line of its own length, that is an arc
+    of some radius, and a line is one only where that radius comes out flatter
+    than any curve worth drawing. A pixel is nothing over the length of a drawn
+    side, which is why the bow is read against the length rather than on its own,
+    and it is the whole of the cap on a stick, which is why the cap does not come
+    out as the two or three lines its own chords would make of it.
+    """
+    size = len(points)
+    first, last = points[start], points[end]
+    length = hypot(last[0] - first[0], last[1] - first[1])
+    if length < minimum_length:
+        return False
+    stop = end if end > start else end + size
+    bow = max(
+        _offset(first, last, points[index % size])
+        for index in range(start, stop + 1)
+    )
+    return bow <= tolerance and length * length >= 8 * bow * radius
+
+
+def _straight_runs(
+    points: list[AxisPoint],
+    indices: list[int],
+    minimum_length: float,
+    tolerance: float,
+    radius: float,
+    span: float,
+    angle: float,
+    dominant_length: float,
+) -> tuple[list[int], tuple[bool, ...]]:
+    """Find the stretches of the polygon the boundary really runs straight along.
+
+    A line runs from one break to the next, so those are the only places one can
+    start or stop, and `_runs_straight` says whether the boundary between them
+    is one. Whatever vertices the approximation left along the way are dropped,
+    or a line the boundary wandered off by a third of a pixel in the middle of
+    would come out as two lines that miss being one by a degree.
+
+    A stretch already longer than anything a curve is approximated by ends
+    wherever it ends, break or no break: a corner rounded off by a fillet
+    broader than the sharpest curve worth keeping still has the line stop at it.
+    Everywhere else the breaks are what keep the long chords a gentle curve is
+    approximated by from passing for lines and facetting it.
+    """
+    polygon = [points[index] for index in indices]
+    breaks = _breaks(polygon, span, angle)
+    size = len(indices)
+    for position, point in enumerate(polygon):
+        following = (position + 1) % size
+        if (
+            hypot(polygon[following][0] - point[0], polygon[following][1] - point[1])
+            >= dominant_length
+        ):
+            breaks[position] = breaks[following] = True
+    marks = [position for position in range(size) if breaks[position]]
+    if not marks:
+        return indices, (False,) * size
+
+    def straight_to(start: int, stop: int) -> bool:
+        return _runs_straight(
+            points,
+            indices[marks[start]],
+            indices[marks[stop % len(marks)]],
+            minimum_length,
+            tolerance,
+            radius,
+        )
+
+    kept = []
+    flags = []
+    position = 0
+    while position < len(marks):
+        end = position + 1
+        straight = straight_to(position, end)
+        if straight:
+            while end < len(marks) and straight_to(position, end + 1):
+                end += 1
+        kept.append(indices[marks[position]])
+        flags.append(straight)
+        if not straight:
+            step = marks[position] + 1
+            while step % size != marks[end % len(marks)]:
+                kept.append(indices[step % size])
+                flags.append(False)
+                step += 1
+        position = end
+    return kept, tuple(flags)
+
+
+def preprocess_contours(
     contours: tuple[tuple[AxisPoint, ...], ...],
-) -> tuple[tuple[AxisPoint, ...], ...]:
+    simplify_tolerance: float = 0.25,
+    minimum_straight: float = 8.0,
+    straight_tolerance: float = 1.0,
+    straight_radius: float = 100.0,
+    break_span: float = 12.0,
+    break_angle: float = 30.0,
+    dominant_straight: float = 64.0,
+) -> tuple[tuple[tuple[AxisPoint, ...], ...], tuple[tuple[bool, ...], ...]]:
     result = []
+    straights = []
     for contour in contours:
         path = _remove_duplicated_points(contour)
         if len(path) < 3:
-            return ()
-        path = _remove_staircase(path)
-        path = _limit_penalties(path)
-        path = _remove_collinear(path)
+            continue
+        indices = _remove_collinear(
+            path, _limit_penalties(path, simplify_tolerance)
+        )
 
-        if len(path) >= 3:
-            result.append((*path, path[0]))
-    return tuple(result)
+        if len(indices) >= 3:
+            indices, straight = _straight_runs(
+                path,
+                indices,
+                minimum_straight,
+                straight_tolerance,
+                straight_radius,
+                break_span,
+                break_angle,
+                dominant_straight,
+            )
+            corners = [path[index] for index in indices]
+            straights.append(straight)
+            result.append((*corners, corners[0]))
+    return tuple(result), tuple(straights)
 
 
 def smooth_contours(
     contours: tuple[tuple[AxisPoint, ...], ...],
+    straights: tuple[tuple[bool, ...], ...],
     angle_threshold: float,
     smooth_tolerance: float,
 ) -> tuple[tuple[BezierCurve, ...], ...]:
     result = []
-    for contour in contours:
-        smoothed, corners = subdivide_closed_path(contour, angle_threshold)
-        curves = fit_closed_contour(smoothed, corners, smooth_tolerance)
+    for contour, straight in zip(contours, straights, strict=True):
+        corners = corner_flags(contour, angle_threshold)
+        curves = fit_closed_contour(contour, corners, straight, smooth_tolerance)
         if curves:
             result.append(curves)
     return tuple(result)
