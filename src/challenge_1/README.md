@@ -24,7 +24,8 @@ Three ideas do most of the work:
   white before grayscale conversion, so an RGBA image whose drawing is stored
   in its alpha channel does not become a solid-black canvas.
 - **Trace the grayscale, not the binary.** The threshold picks a level; the
-  contours are then interpolated through the original gray pixels at that level.
+  contours are then interpolated through the original gray pixels at that level
+  by `skimage.measure.find_contours`, which implements marching squares.
   Antialiased edges keep their real position instead of becoming pixel
   staircases.
 - **Decide what is straight before fitting anything.** Flat spans are found and

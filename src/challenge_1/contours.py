@@ -2,6 +2,7 @@ from collections.abc import Sequence
 from math import atan2, degrees, hypot
 
 import numpy as np
+from skimage.measure import find_contours
 
 from pictographic.curves import (
     AxisPoint,
@@ -9,48 +10,6 @@ from pictographic.curves import (
     corner_flags,
     fit_closed_contour,
 )
-
-_SEGMENTS: dict[int, tuple[tuple[str, str], ...]] = {
-    1: (("L", "T"),),
-    2: (("T", "R"),),
-    3: (("L", "R"),),
-    4: (("R", "B"),),
-    6: (("T", "B"),),
-    7: (("L", "B"),),
-    8: (("B", "L"),),
-    9: (("B", "T"),),
-    11: (("B", "R"),),
-    12: (("R", "L"),),
-    13: (("R", "T"),),
-    14: (("T", "L"),),
-}
-_SADDLES: dict[tuple[int, bool], tuple[tuple[str, str], ...]] = {
-    (5, False): (("L", "T"), ("R", "B")),
-    (5, True): (("R", "T"), ("L", "B")),
-    (10, False): (("T", "R"), ("B", "L")),
-    (10, True): (("T", "L"), ("B", "R")),
-}
-
-
-def _edge(side: str, row: int, column: int) -> tuple[str, int, int]:
-    return {
-        "T": ("h", row, column),
-        "B": ("h", row + 1, column),
-        "L": ("v", row, column),
-        "R": ("v", row, column + 1),
-    }[side]
-
-
-def _crossing(field: np.ndarray, edge: tuple[str, int, int]) -> AxisPoint:
-    kind, row, column = edge
-    first = float(field[row, column])
-    second = float(field[row, column + 1] if kind == "h" else field[row + 1, column])
-    fraction = first / (first - second)
-    return (
-        (column + fraction - 0.5, row - 0.5)
-        if kind == "h"
-        else (column - 0.5, row + fraction - 0.5)
-    )
 
 
 def _cross(first: AxisPoint, second: AxisPoint, third: AxisPoint) -> float:
@@ -265,45 +224,28 @@ def _straight_runs(
 def extract_contours(
     gray_img: np.ndarray, level: float
 ) -> tuple[tuple[AxisPoint, ...], ...]:
-    field = np.pad((level + 0.5) - gray_img.astype(np.float64), 1, constant_values=-1.0)
-    inside = field > 0
-    cases = (
-        inside[:-1, :-1].astype(np.uint8)
-        | inside[:-1, 1:].astype(np.uint8) << 1
-        | inside[1:, 1:].astype(np.uint8) << 2
-        | inside[1:, :-1].astype(np.uint8) << 3
+    # To adjust intensity threshold
+    field = np.pad(
+        (level + 0.5) - gray_img.astype(np.float64),
+        1,
+        constant_values=-1.0,
     )
-    following: dict[tuple[str, int, int], tuple[str, int, int]] = {}
-    for row, column in zip(*np.nonzero((cases > 0) & (cases < 15))):
-        case = int(cases[row, column])
-        if case in (5, 10):
-            middle = (
-                field[row, column]
-                + field[row, column + 1]
-                + field[row + 1, column]
-                + field[row + 1, column + 1]
-            )
-            pairs = _SADDLES[case, bool(middle > 0)]
-        else:
-            pairs = _SEGMENTS[case]
-        for start, end in pairs:
-            following[_edge(start, int(row), int(column))] = _edge(
-                end, int(row), int(column)
-            )
-
     contours = []
-    walked = set()
-    for start in following:
-        if start in walked:
-            continue
-        loop = []
-        edge = start
-        while edge not in walked and edge in following:
-            walked.add(edge)
-            loop.append(_crossing(field, edge))
-            edge = following[edge]
-        if len(loop) >= 4:
-            contours.append(tuple(loop))
+    for contour in find_contours(
+        field,
+        level=0.0,
+        fully_connected="high",
+        positive_orientation="high",
+    ):
+        # scikit-image returns (row, column); the SVG pipeline uses (x, y).
+        # The 0.5 offset is to center the contour on the pixel grid.
+        points = tuple(
+            (float(column - 0.5), float(row - 0.5)) for row, column in contour
+        )
+        if len(points) > 1 and points[0] == points[-1]:
+            points = points[:-1]
+        if len(points) >= 4:
+            contours.append(points)
     return tuple(contours)
 
 
