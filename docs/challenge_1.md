@@ -3,8 +3,7 @@
 Challenge 1 turns a dark-on-light raster image into a compact, filled SVG. It
 traces the **boundary of the ink** rather than the centerline of the pen, so the
 result keeps the silhouette, the separate components, and the enclosed holes of
-the source. Recovering pen strokes is the separate
-[challenge 2](../src/challenge_2/) pipeline.
+the source.
 
 For installation and the short command reference, see the
 [project README](../README.md).
@@ -159,7 +158,7 @@ morphologically filters the source image.
 ## 5. Corner detection
 
 `smooth_contours` calls
-[`pictographic.curves.corner_flags`](../src/pictographic/curves.py), which marks
+[`challenge_1.curve_fitting.corner_flags`](../src/challenge_1/curve_fitting.py), which marks
 any vertex whose direction change is at or above `--angle-threshold` (60 degrees
 by default) as a corner.
 
@@ -168,8 +167,8 @@ treats more of the contour as a smooth run.
 
 ## 6. Adaptive cubic Bezier fitting
 
-`fit_closed_contour` is the other half of
-[pictographic/curves.py](../src/pictographic/curves.py).
+`fit_closed_contour` lives in
+[challenge_1/curve_fitting.py](../src/challenge_1/curve_fitting.py).
 
 **Where the loop is cut.** `_cut_indices` cuts at every corner *and* at both ends
 of every straight run. Giving a straight run its own section means it stays the
@@ -218,14 +217,14 @@ higher value gives a smaller, smoother result.
 | `<stem>-vector.svg` | Debug SVG: colored 1 px Bezier contours with anchor dots |
 | `<stem>-filled.svg` | Final compact black-on-white filled SVG |
 
-Both SVGs are built by [pictographic/svg.py](../src/pictographic/svg.py), which
+Both SVGs are built by [challenge_1/svg.py](../src/challenge_1/svg.py), which
 keeps the path data small three ways: a cubic that is straight within
 0.005 · length becomes an `L` command; consecutive collinear `L` commands in the
 same direction collapse into one; and a repeated `C` command omits the letter.
 Coordinates round to at most two decimals with trailing zeros stripped.
 
 `bezier_svg` draws the debug view — white background, 1 px colored strokes, and a
-dot at each Bezier anchor from `curve_anchors`. Its colors come from
+dot at each Bezier anchor from `get_curve_anchors`. Its colors come from
 `random_contour_colors`, which rejects anything too gray (`max - min < 64`) and
 any duplicate so contours stay distinct. They change between runs and never
 affect the filled output.
@@ -295,16 +294,16 @@ misbehaves.
 | [`challenge_1.contours.extract_contours`](../src/challenge_1/contours.py) | Marching squares with interpolated grayscale crossings |
 | [`challenge_1.contours.preprocess_contours`](../src/challenge_1/contours.py) | Reduces points and identifies exact straight runs |
 | [`challenge_1.contours.smooth_contours`](../src/challenge_1/contours.py) | Detects corners and fits the preprocessed contours |
-| [`challenge_1.contours.curve_anchors`](../src/challenge_1/contours.py) | Bezier endpoints for the debug dots |
-| [`pictographic.curves.corner_flags`](../src/pictographic/curves.py) | Marks sharp turns that must remain corners |
-| [`pictographic.curves.fit_closed_contour`](../src/pictographic/curves.py) | Adaptive cubic Bezier fitting |
-| [`pictographic.svg.bezier_svg`](../src/pictographic/svg.py) | Colored vector debug view and anchor markers |
-| [`pictographic.svg.filled_bezier_svg`](../src/pictographic/svg.py) | Final compound even-odd SVG |
+| [`challenge_1.contours.get_curve_anchors`](../src/challenge_1/contours.py) | Bezier endpoints for the debug dots |
+| [`challenge_1.curve_fitting.corner_flags`](../src/challenge_1/curve_fitting.py) | Marks sharp turns that must remain corners |
+| [`challenge_1.curve_fitting.fit_closed_contour`](../src/challenge_1/curve_fitting.py) | Adaptive cubic Bezier fitting |
+| [`challenge_1.svg.bezier_svg`](../src/challenge_1/svg.py) | Colored vector debug view and anchor markers |
+| [`challenge_1.svg.filled_bezier_svg`](../src/challenge_1/svg.py) | Final compound even-odd SVG |
 
 ## Scope and trade-offs
 
-- Challenge 1 vectorizes outlines. It does not infer pen centerlines or stroke
-  widths; that is challenge 2.
+- The pipeline vectorizes outlines; it does not infer pen centerlines or stroke
+  widths.
 - The input needs a reasonably separable dark subject on a light background.
   Uneven lighting or light-colored ink needs preprocessing or a manually chosen
   `--threshold`.

@@ -110,7 +110,6 @@ dependencies = [
     { name = "numpy" },
     { name = "opencv-contrib-python" },
     { name = "scikit-image" },
-    { name = "scipy" },
 ]
 
 [package.dev-dependencies]
@@ -124,7 +123,6 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.5.1" },
     { name = "opencv-contrib-python", specifier = ">=5.0.0.93" },
     { name = "scikit-image", specifier = ">=0.26.0" },
-    { name = "scipy", specifier = ">=1.18.0" },
 ]
 
 [package.metadata.requires-dev]

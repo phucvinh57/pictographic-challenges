@@ -10,19 +10,17 @@ dependencies = [
     "numpy>=2.5.1",
     "opencv-contrib-python>=5.0.0.93",
     "scikit-image>=0.26.0",
-    "scipy>=1.18.0",
 ]
 
 [project.scripts]
 challenge_1 = "challenge_1:main"
-challenge_2 = "challenge_2:main"
 
 [build-system]
 requires = ["uv_build>=0.12.0,<0.13.0"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-module-name = ["challenge_1", "challenge_2", "pictographic"]
+module-name = ["challenge_1"]
 
 [dependency-groups]
 dev = [

@@ -10,84 +10,12 @@ AxisPoint = tuple[float, float]
 
 @dataclass(frozen=True)
 class BezierCurve:
+    """A cubic Bézier span represented by its four control points."""
+
     start: AxisPoint
     first_control: AxisPoint
     second_control: AxisPoint
     end: AxisPoint
-
-
-def resample(points: Sequence[AxisPoint], spacing: float) -> tuple[AxisPoint, ...]:
-    """Walk a polyline at an even arc length, keeping both of its ends."""
-    if len(points) < 2:
-        return tuple(points)
-
-    segments = [
-        (start, end, hypot(end[0] - start[0], end[1] - start[1]))
-        for start, end in pairwise(points)
-    ]
-    if sum(length for _, _, length in segments) == 0:
-        return (points[0],)
-
-    walked = [points[0]]
-    target = spacing
-    traversed = 0.0
-    for start, end, length in segments:
-        while target < traversed + length:
-            fraction = (target - traversed) / length
-            walked.append(
-                (
-                    start[0] + fraction * (end[0] - start[0]),
-                    start[1] + fraction * (end[1] - start[1]),
-                )
-            )
-            target += spacing
-        traversed += length
-
-    walked.append(points[-1])
-    return tuple(walked)
-
-
-def catmull_rom(
-    points: Sequence[AxisPoint], alpha: float
-) -> tuple[BezierCurve, ...]:
-    """Fit cubic Bezier spans that interpolate a Catmull-Rom point chain."""
-    if len(points) < 2:
-        return ()
-
-    chain = list(points)
-    closed = len(chain) > 2 and chain[0] == chain[-1]
-    padded = (
-        [chain[-2], *chain, chain[1]]
-        if closed
-        else [chain[0], *chain, chain[-1]]
-    )
-    knots = [0.0]
-    for start, end in pairwise(padded):
-        step = hypot(end[0] - start[0], end[1] - start[1])
-        knots.append(knots[-1] + max(step, 1e-6) ** alpha)
-
-    curves = []
-    for index in range(1, len(padded) - 2):
-        first, second = padded[index], padded[index + 1]
-        before, after = padded[index - 1], padded[index + 2]
-        span = knots[index + 1] - knots[index]
-        leading = span / (3 * (knots[index + 1] - knots[index - 1]))
-        trailing = span / (3 * (knots[index + 2] - knots[index]))
-        curves.append(
-            BezierCurve(
-                start=first,
-                first_control=(
-                    first[0] + leading * (second[0] - before[0]),
-                    first[1] + leading * (second[1] - before[1]),
-                ),
-                second_control=(
-                    second[0] - trailing * (after[0] - first[0]),
-                    second[1] - trailing * (after[1] - first[1]),
-                ),
-                end=second,
-            )
-        )
-    return tuple(curves)
 
 
 def _closed_points(points: Sequence[AxisPoint]) -> list[AxisPoint]:
@@ -453,63 +381,3 @@ def fit_closed_contour(
             curves[0].start,
         )
     return tuple(curves)
-
-
-def _curve_flatness(curve: BezierCurve) -> float:
-    dx = curve.end[0] - curve.start[0]
-    dy = curve.end[1] - curve.start[1]
-    length = hypot(dx, dy)
-    if length == 0:
-        return max(
-            hypot(point[0] - curve.start[0], point[1] - curve.start[1])
-            for point in (curve.first_control, curve.second_control)
-        )
-    return max(
-        abs(dx * (point[1] - curve.start[1]) - dy * (point[0] - curve.start[0]))
-        / length
-        for point in (curve.first_control, curve.second_control)
-    )
-
-
-def _split_curve(curve: BezierCurve) -> tuple[BezierCurve, BezierCurve]:
-    first = (
-        (curve.start[0] + curve.first_control[0]) / 2,
-        (curve.start[1] + curve.first_control[1]) / 2,
-    )
-    middle = (
-        (curve.first_control[0] + curve.second_control[0]) / 2,
-        (curve.first_control[1] + curve.second_control[1]) / 2,
-    )
-    last = (
-        (curve.second_control[0] + curve.end[0]) / 2,
-        (curve.second_control[1] + curve.end[1]) / 2,
-    )
-    left_middle = ((first[0] + middle[0]) / 2, (first[1] + middle[1]) / 2)
-    right_middle = ((middle[0] + last[0]) / 2, (middle[1] + last[1]) / 2)
-    center = (
-        (left_middle[0] + right_middle[0]) / 2,
-        (left_middle[1] + right_middle[1]) / 2,
-    )
-    return (
-        BezierCurve(curve.start, first, left_middle, center),
-        BezierCurve(center, right_middle, last, curve.end),
-    )
-
-
-def flatten_curves(
-    curves: Sequence[BezierCurve], tolerance: float = 0.25
-) -> tuple[AxisPoint, ...]:
-    """Flatten a cubic chain closely enough for an antialiased raster preview."""
-    if not curves:
-        return ()
-    points = [curves[0].start]
-    pending = [(curve, 0) for curve in reversed(curves)]
-    while pending:
-        curve, depth = pending.pop()
-        if depth >= 16 or _curve_flatness(curve) <= tolerance:
-            points.append(curve.end)
-            continue
-        left, right = _split_curve(curve)
-        pending.append((right, depth + 1))
-        pending.append((left, depth + 1))
-    return tuple(points)

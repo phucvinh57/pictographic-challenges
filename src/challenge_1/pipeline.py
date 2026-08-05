@@ -2,15 +2,14 @@ from pathlib import Path
 
 import cv2
 
-from pictographic.svg import bezier_svg, filled_bezier_svg
-
 from .contours import (
-    curve_anchors,
     extract_contours,
+    get_curve_anchors,
     preprocess_contours,
     smooth_contours,
 )
 from .raster import grayscale_on_white, random_contour_colors, threshold_level
+from .svg import bezier_svg, filled_bezier_svg
 
 
 def process_image(
@@ -37,7 +36,7 @@ def process_image(
         curves,
         1,
         stroke_colors=random_contour_colors(len(curves)),
-        sample_chains=curve_anchors(curves),
+        sample_chains=get_curve_anchors(curves),
     )
     filled = filled_bezier_svg(shape, curves)
 

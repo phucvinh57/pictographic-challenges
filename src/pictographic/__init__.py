@@ -1,1 +1,0 @@
-"""Shared image-vectorization primitives."""

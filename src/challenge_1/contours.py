@@ -1,10 +1,9 @@
-from collections.abc import Sequence
 from math import atan2, degrees, hypot
 
 import numpy as np
 from skimage.measure import find_contours
 
-from pictographic.curves import (
+from .curve_fitting import (
     AxisPoint,
     BezierCurve,
     corner_flags,
@@ -16,17 +15,6 @@ def _cross(first: AxisPoint, second: AxisPoint, third: AxisPoint) -> float:
     return (second[0] - first[0]) * (third[1] - first[1]) - (third[0] - first[0]) * (
         second[1] - first[1]
     )
-
-
-def _remove_duplicated_points(points: Sequence[AxisPoint]) -> list[AxisPoint]:
-    unique = []
-    for point in points:
-        value = (float(point[0]), float(point[1]))
-        if not unique or value != unique[-1]:
-            unique.append(value)
-    if len(unique) > 1 and unique[0] == unique[-1]:
-        unique.pop()
-    return unique
 
 
 def _penalty(first: AxisPoint, point: AxisPoint, last: AxisPoint) -> float:
@@ -262,7 +250,7 @@ def preprocess_contours(
     result = []
     straights = []
     for contour in contours:
-        path = _remove_duplicated_points(contour)
+        path = list(contour)
         if len(path) < 3:
             continue
         indices = _remove_collinear(path, _limit_penalties(path, simplify_tolerance))
@@ -299,7 +287,7 @@ def smooth_contours(
     return tuple(result)
 
 
-def curve_anchors(
+def get_curve_anchors(
     contours: tuple[tuple[BezierCurve, ...], ...],
 ) -> tuple[tuple[AxisPoint, ...], ...]:
     return tuple(
