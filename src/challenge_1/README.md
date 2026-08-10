@@ -18,7 +18,7 @@ flowchart TD
     G --> K["name-filled.svg"]
 ```
 
-Three ideas do most of the work:
+Ideas do most of the work:
 
 - **Composite transparency before tracing.** Transparent inputs are placed on
   white before grayscale conversion, so an RGBA image whose drawing is stored
