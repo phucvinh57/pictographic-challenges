@@ -4,8 +4,9 @@ import cv2
 from cv2.typing import MatLike
 from skimage.measure import find_contours
 
-from .types import Contour
+from .types import AxisPoint, Contour
 import numpy as np
+from math import hypot
 
 
 def _convert_to_grayscale(image: MatLike) -> np.ndarray:
@@ -57,12 +58,92 @@ def extract_contours(image_path: Path) -> tuple[Contour, ...]:
             contours.append(points)
     return tuple(contours)
 
-def limit_penalties(contour: Contour) -> Contour:
+
+def _cross_product(a: AxisPoint, b: AxisPoint, c: AxisPoint) -> float:
+    """AB x AC"""
+    return (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])
+
+def _calc_penalty(point: AxisPoint, line: tuple[AxisPoint, AxisPoint]) -> float:
+    """Calculate the distance from a point to a line defined by two points."""
+    first, last = line
+    a = hypot(first[0] - point[0], first[1] - point[1])
+    b = hypot(point[0] - last[0], point[1] - last[1])
+    chord = hypot(last[0] - first[0], last[1] - first[1])
+    if chord == 0:
+        return 0.0
+    semiperimeter = (a + b + chord) / 2
+    # Using Heron's formula to calculate the area of the triangle formed by the three points
+    area_squared = max(
+        0.0,
+        semiperimeter
+        * (semiperimeter - a)
+        * (semiperimeter - b)
+        * (semiperimeter - chord),
+    )
+    # S^2 / chord
+    return area_squared / chord
+
+
+def _limit_penalties(points: list[AxisPoint], tolerance: float = 0.25) -> list[int]:
     """
     To reduce a closed contour to a smaller set of important points,
     while preserving points where the contour has significant curvature/change.
+
+    A potrace-like approach, which is similar to the Ramer-Douglas-Peucker algorithm.
     """
-    if len(contour) <= 3:
-        return contour
-    return ()
-    # Calculate the angles between consecutive segments
+    if len(points) < 3:
+        return list(range(len(points)))
+    close_path = [*points, points[0]]
+    result = [0]
+    last = 0
+    
+    for index in range(1, len(close_path)):
+        if index == last + 1:
+            continue
+        maximum = max(
+            _calc_penalty(close_path[last], (close_path[middle], close_path[index]))
+            for middle in range(last + 1, index)
+        )
+        if maximum >= tolerance:
+            last = index - 1
+            result.append(last)
+        if index == len(close_path) - 1:
+            result.append(index)
+    reduced = result[:-1] if len(result) > 1 else result
+    return reduced if len(reduced) >= 3 else list(range(len(points)))
+
+def _remove_collinear(points: list[AxisPoint], indices: list[int]) -> list[int]:
+    """If three consecutive points are collinear, remove the middle one."""
+    current = indices
+    while len(current) > 3:
+        reduced = [
+            index
+            for position, index in enumerate(current)
+            if abs(
+                _cross_product(
+                    points[current[position - 1]],
+                    points[index],
+                    points[current[(position + 1) % len(current)]],
+                )
+            )
+            > 1e-9
+        ]
+        if len(reduced) < 3 or len(reduced) == len(current):
+            break
+        current = reduced
+    return current
+
+def process_contour(contours: tuple[Contour, ...]) -> None:
+    result = []
+    straights = []
+    for contour in contours:
+        path = list(contour)
+        if len(path) < 3:
+            continue
+        indices = _remove_collinear(path, _limit_penalties(path))
+        if len(indices) < 3:
+            continue
+        
+
+
+__all__ = ["extract_contours", "process_contour"]
