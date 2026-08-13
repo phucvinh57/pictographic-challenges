@@ -289,11 +289,3 @@ def smooth_contours(
         if curves:
             result.append(curves)
     return tuple(result)
-
-
-def get_curve_anchors(
-    contours: tuple[tuple[BezierCurve, ...], ...],
-) -> tuple[tuple[AxisPoint, ...], ...]:
-    return tuple(
-        (curves[0].start, *(curve.end for curve in curves)) for curves in contours
-    )

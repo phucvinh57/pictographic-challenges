@@ -1,5 +1,3 @@
-from random import randint
-
 import cv2
 import numpy as np
 
@@ -29,18 +27,3 @@ def threshold_level(gray: np.ndarray, threshold: int | None) -> float:
         flags |= cv2.THRESH_OTSU
     level, _ = cv2.threshold(gray, threshold, 255, flags)
     return float(level)
-
-
-def random_contour_colors(count: int) -> tuple[str, ...]:
-    colors = []
-    used = set()
-    while len(colors) < count:
-        red, green, blue = (randint(32, 223) for _ in range(3))
-        if max(red, green, blue) - min(red, green, blue) < 64:
-            continue
-        color = f"#{red:02x}{green:02x}{blue:02x}"
-        if color in used:
-            continue
-        used.add(color)
-        colors.append(color)
-    return tuple(colors)

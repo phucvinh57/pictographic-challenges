@@ -14,7 +14,6 @@ flowchart TD
     D --> E["Fewer points, straight runs marked"]
     E --> F["Corners marked"]
     F --> G["Bezier contours"]
-    G --> J["name-vector.svg"]
     G --> K["name-filled.svg"]
 ```
 

@@ -66,50 +66,6 @@ def _path(curves: tuple[BezierCurve, ...]) -> str:
     return " ".join(commands)
 
 
-def bezier_svg(
-    shape: tuple[int, int],
-    chains: tuple[tuple[BezierCurve, ...], ...],
-    stroke_width: float,
-    stroke_colors: Sequence[str] | None = None,
-    sample_chains: Sequence[Sequence[AxisPoint]] | None = None,
-    sample_radius: float = 2,
-) -> str:
-    height, width = shape
-    if stroke_colors is not None and len(stroke_colors) != len(chains):
-        raise ValueError("stroke_colors must contain one color per Bezier chain")
-    if sample_chains is not None and len(sample_chains) != len(chains):
-        raise ValueError("sample_chains must contain one point chain per Bezier chain")
-    paths = []
-    for index, curves in enumerate(chains):
-        if not curves:
-            continue
-        color = "" if stroke_colors is None else f' stroke="{stroke_colors[index]}"'
-        paths.append(f'    <path d="{_path(curves)}"{color} />')
-    samples = []
-    for index, points in enumerate(sample_chains or ()):
-        color = "black" if stroke_colors is None else stroke_colors[index]
-        unique_points = points[:-1] if len(points) > 1 and points[0] == points[-1] else points
-        samples.extend(
-            f'    <circle cx="{_number(point[0])}" cy="{_number(point[1])}" '
-            f'r="{_number(sample_radius)}" fill="{color}" />'
-            for point in unique_points
-        )
-    sample_group = (
-        "  <g>\n" + "\n".join(samples) + "\n  </g>\n" if samples else ""
-    )
-    return (
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
-        f'viewBox="0 0 {width} {height}">\n'
-        f'  <rect width="{width}" height="{height}" fill="white" />\n'
-        f'  <g fill="none" stroke="black" stroke-width="{_number(stroke_width)}" '
-        f'stroke-linecap="round" stroke-linejoin="round">\n'
-        f'{"\n".join(paths)}\n'
-        f"  </g>\n"
-        f"{sample_group}"
-        f"</svg>\n"
-    )
-
-
 def filled_bezier_svg(
     shape: tuple[int, int],
     contours: Sequence[tuple[BezierCurve, ...]],

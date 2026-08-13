@@ -2,7 +2,7 @@ import argparse
 from math import isfinite
 from pathlib import Path
 
-from .pipeline import output_paths_for, process_image
+from .pipeline import output_path_for, process_image
 
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
 DEFAULT_ANGLE_THRESHOLD = 60
@@ -87,10 +87,9 @@ def main() -> None:
 
     input_root = args.input if input_is_dir else args.input.parent
     for image_path in image_paths:
-        output_paths = output_paths_for(image_path, input_root, args.output)
         process_image(
             image_path,
-            *output_paths,
+            output_path_for(image_path, input_root, args.output),
             args.threshold,
             args.angle_threshold,
             args.smooth_tolerance,

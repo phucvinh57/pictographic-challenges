@@ -4,17 +4,15 @@ import cv2
 
 from .contours import (
     extract_contours,
-    get_curve_anchors,
     preprocess_contours,
     smooth_contours,
 )
-from .raster import grayscale_on_white, random_contour_colors, threshold_level
-from .svg import bezier_svg, filled_bezier_svg
+from .raster import grayscale_on_white, threshold_level
+from .svg import filled_bezier_svg
 
 
 def process_image(
     input_path: Path,
-    vector_path: Path,
     filled_path: Path,
     threshold: int | None,
     angle_threshold: float,
@@ -31,28 +29,12 @@ def process_image(
     curves = smooth_contours(
         contours, straights, angle_threshold, smooth_tolerance
     )
-    vector = bezier_svg(
-        shape,
-        curves,
-        1,
-        stroke_colors=random_contour_colors(len(curves)),
-        sample_chains=get_curve_anchors(curves),
-    )
     filled = filled_bezier_svg(shape, curves)
 
-    vector_path.parent.mkdir(parents=True, exist_ok=True)
     filled_path.parent.mkdir(parents=True, exist_ok=True)
-
-    vector_path.write_text(vector)
     filled_path.write_text(filled)
 
 
-def output_paths_for(
-    image_path: Path, input_root: Path, output_root: Path
-) -> tuple[Path, Path]:
+def output_path_for(image_path: Path, input_root: Path, output_root: Path) -> Path:
     relative_path = image_path.relative_to(input_root)
-    output_dir = output_root / relative_path.parent
-    return (
-        output_dir / f"{relative_path.stem}-vector.svg",
-        output_dir / f"{relative_path.stem}-filled.svg",
-    )
+    return output_root / relative_path.parent / f"{relative_path.stem}-filled.svg"
