@@ -136,11 +136,11 @@ def _remove_collinear(points: list[AxisPoint], indices: list[int]) -> list[int]:
     return current
 
 
-def _bend(ab: AxisPoint, b: AxisPoint, c: AxisPoint) -> float:
+def _bend(a: AxisPoint, b: AxisPoint, c: AxisPoint) -> float:
     """
     Returns the signed angle in degrees between the vectors AB and BC.
     """
-    ab = (b[0] - ab[0], b[1] - ab[1])
+    ab = (b[0] - a[0], b[1] - a[1])
     bc = (c[0] - b[0], c[1] - b[1])
     return degrees(
         atan2(
@@ -155,8 +155,10 @@ def _distance(a: AxisPoint, b: AxisPoint) -> float:
     return hypot(b[0] - a[0], b[1] - a[1])
 
 
-def _breaks(
-    polygon: list[AxisPoint], span_length_threshold: float, angle_threshold: float
+def _get_break_points(
+    polygon: list[AxisPoint],
+    span_length_threshold: float = 12.0,
+    angle_threshold: float = 30.0,
 ) -> list[bool]:
     size = len(polygon)
     turns = [
@@ -173,13 +175,14 @@ def _breaks(
         travelled = 0.0
         current = index
         for _ in range(size - 1):
-            following = (current + step) % size
-            length = lengths[current if step > 0 else following]
+            next = (current + step) % size
+            length = lengths[next]
             if travelled + length > span_length_threshold:
                 break
             travelled += length
-            total += abs(turns[following])
-            current = following
+            total += abs(turns[next])
+            current = next
+
         edge = lengths[current if step > 0 else (current - 1) % size]
         return total, travelled, min(edge / 2, span_length_threshold / 2)
 
@@ -199,17 +202,91 @@ def _breaks(
         )
     return breaks
 
+def _is_straight_span(
+    points: list[AxisPoint],
+    start: int,
+    end: int,
+    minimum_length: float = 8.0,
+    tolerance: float = 1.0,
+    radius: float = 100.0,
+) -> bool:
+    size = len(points)
+    first, last = points[start], points[end]
+    length = _distance(first, last)
+    if length < minimum_length:
+        return False
 
-def process_contour(contours: tuple[Contour, ...]) -> None:
-    result = []
-    straights = []
-    for contour in contours:
-        path = list(contour)
-        if len(path) < 3:
-            continue
-        indices = _remove_collinear(path, _limit_penalties(path))
-        if len(indices) < 3:
-            continue
+    stop = end if end > start else end + size
+    bow = max(
+        _distance(first, points[index % size]) for index in range(start, stop + 1)
+    )
+    # See https://en.wikipedia.org/wiki/Sagitta_(geometry)
+    return bow <= tolerance and length * length >= 8 * bow * radius
 
 
+def _identify_straight_runs(
+    contour: list[AxisPoint],
+    indices: list[int],
+    dominant_length: float = 64.0,
+) -> tuple[list[int], tuple[bool, ...]]:
+    polygon = [contour[i] for i in indices]
+    breaks = _get_break_points(polygon)
+    size = len(indices)
+
+    for i, point in enumerate(polygon):
+        next = (i + 1) % size
+        if _distance(point, polygon[next]) >= dominant_length:
+            breaks[i] = breaks[next] = True
+    marks = [i for i in range(size) if breaks[i]]
+
+    if not marks:
+        return indices, (False,) * size
+
+    def is_straight(start: int, stop: int) -> bool:
+        return _is_straight_span(
+            contour,
+            indices[marks[start]],
+            indices[marks[stop % len(marks)]],
+        )
+
+    kept = []
+    flags = []
+    i = 0
+
+    while i < len(marks):
+        end = i + 1
+        straight = is_straight(i, end)
+        if straight:
+            while end < len(marks) and is_straight(i, end + 1):
+                end += 1
+        kept.append(indices[marks[i]])
+        flags.append(straight)
+        if not straight:
+            step = marks[i] + 1
+            while step % size != marks[end % len(marks)]:
+                kept.append(indices[step % size])
+                flags.append(False)
+                step += 1
+        i = end
+    return kept, tuple(flags)
+
+
+def process_contour(contour: Contour) -> tuple[Contour, tuple[bool, ...]]:
+    
+    path = list(contour)
+    # A being a closed contour, we need at least 3 points to form a polygon.
+    if len(path) < 3:
+        return contour, (False,) * len(contour)
+
+    # Indices of points that are important to the shape of the contour, after removing collinear points.
+    indices = _remove_collinear(path, _limit_penalties(path))
+    if len(indices) < 3:
+        return contour, (False,) * len(contour)
+
+    # Straight flags indicate whether the segment between two consecutive points is straight or not.
+    # For example, straight_flags[i] is True if the segment between corners[i] and corners[(i + 1) % len(corners)] is straight.
+    kept_indices, straight_flags = _identify_straight_runs(path, indices)
+    corners = [contour[i] for i in kept_indices]
+
+    return (*corners, corners[0]), straight_flags
 __all__ = ["extract_contours", "process_contour"]
