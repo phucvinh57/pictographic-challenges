@@ -6,7 +6,7 @@ from skimage.measure import find_contours
 
 from .types import AxisPoint, Contour
 import numpy as np
-from math import hypot
+from math import hypot, atan2, degrees
 
 
 def _convert_to_grayscale(image: MatLike) -> np.ndarray:
@@ -63,6 +63,7 @@ def _cross_product(a: AxisPoint, b: AxisPoint, c: AxisPoint) -> float:
     """AB x AC"""
     return (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])
 
+
 def _calc_penalty(point: AxisPoint, line: tuple[AxisPoint, AxisPoint]) -> float:
     """Calculate the distance from a point to a line defined by two points."""
     first, last = line
@@ -96,7 +97,7 @@ def _limit_penalties(points: list[AxisPoint], tolerance: float = 0.25) -> list[i
     close_path = [*points, points[0]]
     result = [0]
     last = 0
-    
+
     for index in range(1, len(close_path)):
         if index == last + 1:
             continue
@@ -111,6 +112,7 @@ def _limit_penalties(points: list[AxisPoint], tolerance: float = 0.25) -> list[i
             result.append(index)
     reduced = result[:-1] if len(result) > 1 else result
     return reduced if len(reduced) >= 3 else list(range(len(points)))
+
 
 def _remove_collinear(points: list[AxisPoint], indices: list[int]) -> list[int]:
     """If three consecutive points are collinear, remove the middle one."""
@@ -133,6 +135,71 @@ def _remove_collinear(points: list[AxisPoint], indices: list[int]) -> list[int]:
         current = reduced
     return current
 
+
+def _bend(ab: AxisPoint, b: AxisPoint, c: AxisPoint) -> float:
+    """
+    Returns the signed angle in degrees between the vectors AB and BC.
+    """
+    ab = (b[0] - ab[0], b[1] - ab[1])
+    bc = (c[0] - b[0], c[1] - b[1])
+    return degrees(
+        atan2(
+            ab[0] * bc[1] - ab[1] * bc[0],
+            ab[0] * bc[0] + ab[1] * bc[1],
+        )
+    )
+
+
+def _distance(a: AxisPoint, b: AxisPoint) -> float:
+    """|AB|"""
+    return hypot(b[0] - a[0], b[1] - a[1])
+
+
+def _breaks(
+    polygon: list[AxisPoint], span_length_threshold: float, angle_threshold: float
+) -> list[bool]:
+    size = len(polygon)
+    turns = [
+        _bend(polygon[index - 1], point, polygon[(index + 1) % size])
+        for index, point in enumerate(polygon)
+    ]
+    lengths = [
+        _distance(point, polygon[(index + 1) % size])
+        for index, point in enumerate(polygon)
+    ]
+
+    def gather(index: int, step: int) -> tuple[float, float, float]:
+        total = 0.0
+        travelled = 0.0
+        current = index
+        for _ in range(size - 1):
+            following = (current + step) % size
+            length = lengths[current if step > 0 else following]
+            if travelled + length > span_length_threshold:
+                break
+            travelled += length
+            total += abs(turns[following])
+            current = following
+        edge = lengths[current if step > 0 else (current - 1) % size]
+        return total, travelled, min(edge / 2, span_length_threshold / 2)
+
+    breaks = []
+    for index in range(size):
+        behind, behind_arc, behind_edge = gather(index, -1)
+        ahead, ahead_arc, ahead_edge = gather(index, 1)
+
+        total_bend = abs(turns[index]) + behind + ahead
+        total_length = behind_arc + ahead_arc + behind_edge + ahead_edge
+
+        breaks.append(
+            total_bend >= angle_threshold
+            # total_bend / total_length >= angle_threshold / span_length_threshold
+            # To detect if bend is sufficiently concentrated
+            and total_bend / total_length >= angle_threshold / span_length_threshold
+        )
+    return breaks
+
+
 def process_contour(contours: tuple[Contour, ...]) -> None:
     result = []
     straights = []
@@ -143,7 +210,6 @@ def process_contour(contours: tuple[Contour, ...]) -> None:
         indices = _remove_collinear(path, _limit_penalties(path))
         if len(indices) < 3:
             continue
-        
 
 
 __all__ = ["extract_contours", "process_contour"]
