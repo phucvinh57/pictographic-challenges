@@ -84,16 +84,23 @@ def _offset(start: AxisPoint, end: AxisPoint, point: AxisPoint) -> float:
     return abs(_cross(start, end, point)) / length
 
 
-def _bend(first: AxisPoint, point: AxisPoint, last: AxisPoint) -> float:
-    incoming = (point[0] - first[0], point[1] - first[1])
-    outgoing = (last[0] - point[0], last[1] - point[1])
+def _bend(ab: AxisPoint, b: AxisPoint, c: AxisPoint) -> float:
+    """
+    Returns the signed angle in degrees between the vectors AB and BC.
+    """
+    ab = (b[0] - ab[0], b[1] - ab[1])
+    bc = (c[0] - b[0], c[1] - b[1])
     return degrees(
         atan2(
-            incoming[0] * outgoing[1] - incoming[1] * outgoing[0],
-            incoming[0] * outgoing[0] + incoming[1] * outgoing[1],
+            ab[0] * bc[1] - ab[1] * bc[0],
+            ab[0] * bc[0] + ab[1] * bc[1],
         )
     )
 
+
+def _distance(a: AxisPoint, b: AxisPoint) -> float:
+    """|AB|"""
+    return hypot(b[0] - a[0], b[1] - a[1])
 
 def _breaks(polygon: list[AxisPoint], span: float, angle: float) -> list[bool]:
     size = len(polygon)
@@ -102,10 +109,7 @@ def _breaks(polygon: list[AxisPoint], span: float, angle: float) -> list[bool]:
         for index, point in enumerate(polygon)
     ]
     lengths = [
-        hypot(
-            polygon[(index + 1) % size][0] - point[0],
-            polygon[(index + 1) % size][1] - point[1],
-        )
+        _distance(point, polygon[(index + 1) % size])
         for index, point in enumerate(polygon)
     ]
 
@@ -134,7 +138,7 @@ def _breaks(polygon: list[AxisPoint], span: float, angle: float) -> list[bool]:
     return breaks
 
 
-def _runs_straight(
+def _is_straight_span(
     points: list[AxisPoint],
     start: int,
     end: int,
@@ -154,7 +158,7 @@ def _runs_straight(
     return bow <= tolerance and length * length >= 8 * bow * radius
 
 
-def _straight_runs(
+def _identify_straight_runs(
     points: list[AxisPoint],
     indices: list[int],
     minimum_length: float,
@@ -179,7 +183,7 @@ def _straight_runs(
         return indices, (False,) * size
 
     def straight_to(start: int, stop: int) -> bool:
-        return _runs_straight(
+        return _is_straight_span(
             points,
             indices[marks[start]],
             indices[marks[stop % len(marks)]],
@@ -249,15 +253,15 @@ def preprocess_contours(
 ) -> tuple[tuple[tuple[AxisPoint, ...], ...], tuple[tuple[bool, ...], ...]]:
     result = []
     straights = []
-    for contour in contours:
-        path = list(contour)
-        if len(path) < 3:
+    for c in contours:
+        contour = list(c)
+        if len(contour) < 3:
             continue
-        indices = _remove_collinear(path, _limit_penalties(path, simplify_tolerance))
+        indices = _remove_collinear(contour, _limit_penalties(contour, simplify_tolerance))
 
         if len(indices) >= 3:
-            indices, straight = _straight_runs(
-                path,
+            indices, straight = _identify_straight_runs(
+                contour,
                 indices,
                 minimum_straight,
                 straight_tolerance,
@@ -266,7 +270,7 @@ def preprocess_contours(
                 break_angle,
                 dominant_straight,
             )
-            corners = [path[index] for index in indices]
+            corners = [contour[index] for index in indices]
             straights.append(straight)
             result.append((*corners, corners[0]))
     return tuple(result), tuple(straights)
