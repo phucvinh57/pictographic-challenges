@@ -18,17 +18,6 @@ class BezierCurve:
     end: AxisPoint
 
 
-def _closed_points(points: Sequence[AxisPoint]) -> list[AxisPoint]:
-    unique = []
-    for point in points:
-        value = (float(point[0]), float(point[1]))
-        if not unique or value != unique[-1]:
-            unique.append(value)
-    if len(unique) > 1 and unique[0] == unique[-1]:
-        unique.pop()
-    return unique
-
-
 def _turn(first: AxisPoint, point: AxisPoint, last: AxisPoint) -> float:
     incoming = (point[0] - first[0], point[1] - first[1])
     outgoing = (last[0] - point[0], last[1] - point[1])
@@ -42,15 +31,13 @@ def corner_flags(
     points: Sequence[AxisPoint], threshold: float
 ) -> tuple[bool, ...]:
     """Say which of a closed path's vertices the path turns a corner at."""
-    path = _closed_points(points)
-    if len(path) < 3:
+    if len(points) < 3:
         return ()
-    flags = [
-        abs(degrees(_turn(path[index - 1], point, path[(index + 1) % len(path)])))
+    return tuple(
+        abs(degrees(_turn(points[index - 1], point, points[(index + 1) % len(points)])))
         >= threshold
-        for index, point in enumerate(path)
-    ]
-    return (*flags, flags[0])
+        for index, point in enumerate(points)
+    )
 
 
 def _unit(vector: AxisPoint) -> AxisPoint:
@@ -339,23 +326,23 @@ def fit_closed_contour(
     tangent_span: float = 3.0,
 ) -> tuple[BezierCurve, ...]:
     """Fit an adaptive cubic chain around a smoothed closed contour."""
-    path = _closed_points(points)
-    corner_flags = list(corners[:-1] if len(corners) == len(path) + 1 else corners)
-    runs = list(straight[: len(path)])
-    if len(path) < 3 or len(corner_flags) != len(path) or len(runs) != len(path):
+    corner_flags = list(corners)
+    runs = list(straight)
+
+    if len(points) < 3 or len(corner_flags) != len(points) or len(runs) != len(points):
         return ()
-    cuts = _cut_indices(path, corner_flags, runs)
-    tangents = _cut_tangents(path, corner_flags, runs, cuts, tangent_span)
+    cuts = _cut_indices(points, corner_flags, runs)
+    tangents = _cut_tangents(points, corner_flags, runs, cuts, tangent_span)
     curves = []
     witness_spacing = min(1.0, max(0.25, tolerance))
     for start, end in pairwise([*cuts, cuts[0]]):
-        if runs[start] and end == (start + 1) % len(path):
-            curves.append(_line_curve(path[start], path[end]))
+        if runs[start] and end == (start + 1) % len(points):
+            curves.append(_line_curve(points[start], points[end]))
             continue
         section = (
-            path[start : end + 1]
+            points[start : end + 1]
             if start < end
-            else [*path[start:], *path[: end + 1]]
+            else [*points[start:], *points[: end + 1]]
         )
         dense = _densify(section, witness_spacing)
         start_tangent = tangents[start][1]

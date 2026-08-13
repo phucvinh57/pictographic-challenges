@@ -272,7 +272,7 @@ def preprocess_contours(
             )
             corners = [contour[index] for index in indices]
             straights.append(straight)
-            result.append((*corners, corners[0]))
+            result.append(tuple(corners))
     return tuple(result), tuple(straights)
 
 
