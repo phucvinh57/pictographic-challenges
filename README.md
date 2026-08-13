@@ -5,7 +5,7 @@ Binarizes images and traces their ink boundaries as smooth vector contours.
 Each input image produces a compact filled SVG.
 
 For a stage-by-stage explanation of the outline vectorizer, see:
-- [Challenge 1: raster outline to SVG](docs/challenge_1.md).
+- [Challenge 1: raster outline to SVG](src/challenge_1/README.md).
 
 ## Presequisite
 

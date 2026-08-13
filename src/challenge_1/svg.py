@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from math import hypot
 
-from .curve_fitting import AxisPoint, BezierCurve
+from .geometry import AxisPoint, BezierCurve
 
 
 def _number(value: float) -> str:

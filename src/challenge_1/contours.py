@@ -1,37 +1,16 @@
-from math import atan2, degrees, hypot
-
 import numpy as np
 from skimage.measure import find_contours
 
-from .curve_fitting import (
+from .curve_fitting import corner_flags, fit_closed_contour
+from .geometry import (
     AxisPoint,
     BezierCurve,
-    corner_flags,
-    fit_closed_contour,
+    cross,
+    distance,
+    offset,
+    penalty,
+    signed_angle,
 )
-
-
-def _cross(first: AxisPoint, second: AxisPoint, third: AxisPoint) -> float:
-    return (second[0] - first[0]) * (third[1] - first[1]) - (third[0] - first[0]) * (
-        second[1] - first[1]
-    )
-
-
-def _penalty(first: AxisPoint, point: AxisPoint, last: AxisPoint) -> float:
-    side_a = hypot(first[0] - point[0], first[1] - point[1])
-    side_b = hypot(point[0] - last[0], point[1] - last[1])
-    chord = hypot(last[0] - first[0], last[1] - first[1])
-    if chord == 0:
-        return 0.0
-    semiperimeter = (side_a + side_b + chord) / 2
-    area_squared = max(
-        0.0,
-        semiperimeter
-        * (semiperimeter - side_a)
-        * (semiperimeter - side_b)
-        * (semiperimeter - chord),
-    )
-    return area_squared / chord
 
 
 def _limit_penalties(points: list[AxisPoint], tolerance: float = 0.25) -> list[int]:
@@ -44,7 +23,7 @@ def _limit_penalties(points: list[AxisPoint], tolerance: float = 0.25) -> list[i
         if index == last + 1:
             continue
         maximum = max(
-            _penalty(path[last], path[middle], path[index])
+            penalty(path[last], path[middle], path[index])
             for middle in range(last + 1, index)
         )
         if maximum >= tolerance:
@@ -63,7 +42,7 @@ def _remove_collinear(points: list[AxisPoint], indices: list[int]) -> list[int]:
             index
             for position, index in enumerate(current)
             if abs(
-                _cross(
+                cross(
                     points[current[position - 1]],
                     points[index],
                     points[current[(position + 1) % len(current)]],
@@ -77,39 +56,14 @@ def _remove_collinear(points: list[AxisPoint], indices: list[int]) -> list[int]:
     return current
 
 
-def _offset(start: AxisPoint, end: AxisPoint, point: AxisPoint) -> float:
-    length = hypot(end[0] - start[0], end[1] - start[1])
-    if length == 0:
-        return hypot(point[0] - start[0], point[1] - start[1])
-    return abs(_cross(start, end, point)) / length
-
-
-def _bend(ab: AxisPoint, b: AxisPoint, c: AxisPoint) -> float:
-    """
-    Returns the signed angle in degrees between the vectors AB and BC.
-    """
-    ab = (b[0] - ab[0], b[1] - ab[1])
-    bc = (c[0] - b[0], c[1] - b[1])
-    return degrees(
-        atan2(
-            ab[0] * bc[1] - ab[1] * bc[0],
-            ab[0] * bc[0] + ab[1] * bc[1],
-        )
-    )
-
-
-def _distance(a: AxisPoint, b: AxisPoint) -> float:
-    """|AB|"""
-    return hypot(b[0] - a[0], b[1] - a[1])
-
 def _breaks(polygon: list[AxisPoint], span: float, angle: float) -> list[bool]:
     size = len(polygon)
     turns = [
-        _bend(polygon[index - 1], point, polygon[(index + 1) % size])
+        signed_angle(polygon[index - 1], point, polygon[(index + 1) % size])
         for index, point in enumerate(polygon)
     ]
     lengths = [
-        _distance(point, polygon[(index + 1) % size])
+        distance(point, polygon[(index + 1) % size])
         for index, point in enumerate(polygon)
     ]
 
@@ -148,12 +102,12 @@ def _is_straight_span(
 ) -> bool:
     size = len(points)
     first, last = points[start], points[end]
-    length = hypot(last[0] - first[0], last[1] - first[1])
+    length = distance(first, last)
     if length < minimum_length:
         return False
     stop = end if end > start else end + size
     bow = max(
-        _offset(first, last, points[index % size]) for index in range(start, stop + 1)
+        offset(first, last, points[index % size]) for index in range(start, stop + 1)
     )
     return bow <= tolerance and length * length >= 8 * bow * radius
 
@@ -173,10 +127,7 @@ def _identify_straight_runs(
     size = len(indices)
     for position, point in enumerate(polygon):
         following = (position + 1) % size
-        if (
-            hypot(polygon[following][0] - point[0], polygon[following][1] - point[1])
-            >= dominant_length
-        ):
+        if distance(point, polygon[following]) >= dominant_length:
             breaks[position] = breaks[following] = True
     marks = [position for position in range(size) if breaks[position]]
     if not marks:

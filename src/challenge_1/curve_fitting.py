@@ -1,30 +1,21 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass
 from itertools import pairwise
-from math import atan2, ceil, degrees, hypot
 
-AxisPoint = tuple[float, float]
-
-
-@dataclass(frozen=True)
-class BezierCurve:
-    """A cubic Bézier span represented by its four control points."""
-
-    start: AxisPoint
-    first_control: AxisPoint
-    second_control: AxisPoint
-    end: AxisPoint
-
-
-def _turn(first: AxisPoint, point: AxisPoint, last: AxisPoint) -> float:
-    incoming = (point[0] - first[0], point[1] - first[1])
-    outgoing = (last[0] - point[0], last[1] - point[1])
-    return atan2(
-        incoming[0] * outgoing[1] - incoming[1] * outgoing[0],
-        incoming[0] * outgoing[0] + incoming[1] * outgoing[1],
-    )
+from .geometry import (
+    AxisPoint,
+    BezierCurve,
+    chord_parameters,
+    densify,
+    distance,
+    fit_error,
+    generate_bezier,
+    line_curve,
+    signed_angle,
+    unit,
+    walk,
+)
 
 
 def corner_flags(
@@ -34,15 +25,10 @@ def corner_flags(
     if len(points) < 3:
         return ()
     return tuple(
-        abs(degrees(_turn(points[index - 1], point, points[(index + 1) % len(points)])))
+        abs(signed_angle(points[index - 1], point, points[(index + 1) % len(points)]))
         >= threshold
         for index, point in enumerate(points)
     )
-
-
-def _unit(vector: AxisPoint) -> AxisPoint:
-    length = hypot(*vector)
-    return (vector[0] / length, vector[1] / length) if length else (0.0, 0.0)
 
 
 def _cut_indices(
@@ -70,24 +56,6 @@ def _cut_indices(
     return ordered
 
 
-def _walk(
-    points: Sequence[AxisPoint], index: int, step: int, span: float
-) -> AxisPoint:
-    size = len(points)
-    current = index
-    travelled = 0.0
-    for _ in range(size - 1):
-        following = (current + step) % size
-        travelled += hypot(
-            points[following][0] - points[current][0],
-            points[following][1] - points[current][1],
-        )
-        current = following
-        if travelled >= span:
-            break
-    return points[current]
-
-
 def _cut_tangents(
     points: Sequence[AxisPoint],
     corners: Sequence[bool],
@@ -108,7 +76,7 @@ def _cut_tangents(
     for index in cuts:
         point = points[index]
         arriving = (
-            _unit(
+            unit(
                 (
                     point[0] - points[index - 1][0],
                     point[1] - points[index - 1][1],
@@ -118,7 +86,7 @@ def _cut_tangents(
             else None
         )
         leaving = (
-            _unit(
+            unit(
                 (
                     points[(index + 1) % size][0] - point[0],
                     points[(index + 1) % size][1] - point[1],
@@ -127,120 +95,23 @@ def _cut_tangents(
             if straight[index]
             else None
         )
-        before = _walk(points, index, -1, span)
-        after = _walk(points, index, 1, span)
+        before = walk(points, index, -1, span)
+        after = walk(points, index, 1, span)
         if corners[index]:
-            incoming = arriving or _unit(
+            incoming = arriving or unit(
                 (point[0] - before[0], point[1] - before[1])
             )
-            outgoing = leaving or _unit(
+            outgoing = leaving or unit(
                 (after[0] - point[0], after[1] - point[1])
             )
         elif arriving or leaving:
             incoming = outgoing = arriving or leaving
         else:
-            incoming = outgoing = _unit(
+            incoming = outgoing = unit(
                 (after[0] - before[0], after[1] - before[1])
             )
         tangents[index] = (incoming, outgoing)
     return tangents
-
-
-def _evaluate(curve: BezierCurve, parameter: float) -> AxisPoint:
-    remaining = 1 - parameter
-    weights = (
-        remaining**3,
-        3 * remaining * remaining * parameter,
-        3 * remaining * parameter * parameter,
-        parameter**3,
-    )
-    controls = (
-        curve.start,
-        curve.first_control,
-        curve.second_control,
-        curve.end,
-    )
-    return (
-        sum(weight * point[0] for weight, point in zip(weights, controls)),
-        sum(weight * point[1] for weight, point in zip(weights, controls)),
-    )
-
-
-def _parameters(points: Sequence[AxisPoint]) -> list[float]:
-    values = [0.0]
-    for first, second in pairwise(points):
-        values.append(values[-1] + hypot(second[0] - first[0], second[1] - first[1]))
-    if values[-1] == 0:
-        return [index / (len(points) - 1) for index in range(len(points))]
-    return [value / values[-1] for value in values]
-
-
-def _generate_bezier(
-    points: Sequence[AxisPoint],
-    parameters: Sequence[float],
-    start_tangent: AxisPoint,
-    end_tangent: AxisPoint,
-) -> BezierCurve:
-    start, end = points[0], points[-1]
-    c00 = c01 = c11 = x0 = x1 = 0.0
-    for point, parameter in zip(points, parameters):
-        remaining = 1 - parameter
-        b0 = remaining**3
-        b1 = 3 * remaining * remaining * parameter
-        b2 = 3 * remaining * parameter * parameter
-        b3 = parameter**3
-        first = (start_tangent[0] * b1, start_tangent[1] * b1)
-        second = (end_tangent[0] * b2, end_tangent[1] * b2)
-        baseline = (
-            start[0] * (b0 + b1) + end[0] * (b2 + b3),
-            start[1] * (b0 + b1) + end[1] * (b2 + b3),
-        )
-        residual = (point[0] - baseline[0], point[1] - baseline[1])
-        c00 += first[0] * first[0] + first[1] * first[1]
-        c01 += first[0] * second[0] + first[1] * second[1]
-        c11 += second[0] * second[0] + second[1] * second[1]
-        x0 += first[0] * residual[0] + first[1] * residual[1]
-        x1 += second[0] * residual[0] + second[1] * residual[1]
-    determinant = c00 * c11 - c01 * c01
-    if abs(determinant) > 1e-12:
-        first_length = (x0 * c11 - x1 * c01) / determinant
-        second_length = (c00 * x1 - c01 * x0) / determinant
-    else:
-        first_length = second_length = 0.0
-    chord = hypot(end[0] - start[0], end[1] - start[1])
-    minimum = chord * 1e-6
-    if first_length < minimum or second_length < minimum:
-        first_length = second_length = chord / 3
-    return BezierCurve(
-        start,
-        (
-            start[0] + start_tangent[0] * first_length,
-            start[1] + start_tangent[1] * first_length,
-        ),
-        (
-            end[0] + end_tangent[0] * second_length,
-            end[1] + end_tangent[1] * second_length,
-        ),
-        end,
-    )
-
-
-def _fit_error(
-    points: Sequence[AxisPoint],
-    parameters: Sequence[float],
-    curve: BezierCurve,
-) -> tuple[float, int]:
-    maximum = 0.0
-    split = len(points) // 2
-    for index in range(1, len(points) - 1):
-        fitted = _evaluate(curve, parameters[index])
-        error = (fitted[0] - points[index][0]) ** 2 + (
-            fitted[1] - points[index][1]
-        ) ** 2
-        if error >= maximum:
-            maximum = error
-            split = index
-    return maximum, split
 
 
 def _fit_cubics(
@@ -250,36 +121,34 @@ def _fit_cubics(
     tolerance_squared: float,
 ) -> list[BezierCurve]:
     if len(points) == 2:
-        distance = hypot(
-            points[1][0] - points[0][0], points[1][1] - points[0][1]
-        ) / 3
+        span = distance(points[0], points[1]) / 3
         return [
             BezierCurve(
                 points[0],
                 (
-                    points[0][0] + start_tangent[0] * distance,
-                    points[0][1] + start_tangent[1] * distance,
+                    points[0][0] + start_tangent[0] * span,
+                    points[0][1] + start_tangent[1] * span,
                 ),
                 (
-                    points[1][0] + end_tangent[0] * distance,
-                    points[1][1] + end_tangent[1] * distance,
+                    points[1][0] + end_tangent[0] * span,
+                    points[1][1] + end_tangent[1] * span,
                 ),
                 points[1],
             )
         ]
-    parameters = _parameters(points)
-    curve = _generate_bezier(points, parameters, start_tangent, end_tangent)
-    error, split = _fit_error(points, parameters, curve)
+    parameters = chord_parameters(points)
+    curve = generate_bezier(points, parameters, start_tangent, end_tangent)
+    error, split = fit_error(points, parameters, curve)
     if error <= tolerance_squared:
         return [curve]
-    center = _unit(
+    center = unit(
         (
             points[split - 1][0] - points[split + 1][0],
             points[split - 1][1] - points[split + 1][1],
         )
     )
     if center == (0.0, 0.0):
-        center = _unit(
+        center = unit(
             (
                 points[split - 1][0] - points[split][0],
                 points[split - 1][1] - points[split][1],
@@ -294,30 +163,6 @@ def _fit_cubics(
     return [*left, *right]
 
 
-def _densify(points: Sequence[AxisPoint], spacing: float) -> tuple[AxisPoint, ...]:
-    dense = [points[0]]
-    for start, end in pairwise(points):
-        length = hypot(end[0] - start[0], end[1] - start[1])
-        divisions = max(1, ceil(length / spacing))
-        dense.extend(
-            (
-                start[0] + (end[0] - start[0]) * index / divisions,
-                start[1] + (end[1] - start[1]) * index / divisions,
-            )
-            for index in range(1, divisions + 1)
-        )
-    return tuple(dense)
-
-
-def _line_curve(start: AxisPoint, end: AxisPoint) -> BezierCurve:
-    return BezierCurve(
-        start,
-        (start[0] + (end[0] - start[0]) / 3, start[1] + (end[1] - start[1]) / 3),
-        (end[0] - (end[0] - start[0]) / 3, end[1] - (end[1] - start[1]) / 3),
-        end,
-    )
-
-
 def fit_closed_contour(
     points: Sequence[AxisPoint],
     corners: Sequence[bool],
@@ -326,25 +171,25 @@ def fit_closed_contour(
     tangent_span: float = 3.0,
 ) -> tuple[BezierCurve, ...]:
     """Fit an adaptive cubic chain around a smoothed closed contour."""
+    path = points
     corner_flags = list(corners)
     runs = list(straight)
-
-    if len(points) < 3 or len(corner_flags) != len(points) or len(runs) != len(points):
+    if len(path) < 3 or len(corner_flags) != len(path) or len(runs) != len(path):
         return ()
-    cuts = _cut_indices(points, corner_flags, runs)
-    tangents = _cut_tangents(points, corner_flags, runs, cuts, tangent_span)
+    cuts = _cut_indices(path, corner_flags, runs)
+    tangents = _cut_tangents(path, corner_flags, runs, cuts, tangent_span)
     curves = []
     witness_spacing = min(1.0, max(0.25, tolerance))
     for start, end in pairwise([*cuts, cuts[0]]):
-        if runs[start] and end == (start + 1) % len(points):
-            curves.append(_line_curve(points[start], points[end]))
+        if runs[start] and end == (start + 1) % len(path):
+            curves.append(line_curve(path[start], path[end]))
             continue
         section = (
-            points[start : end + 1]
+            path[start : end + 1]
             if start < end
-            else [*points[start:], *points[: end + 1]]
+            else [*path[start:], *path[: end + 1]]
         )
-        dense = _densify(section, witness_spacing)
+        dense = densify(section, witness_spacing)
         start_tangent = tangents[start][1]
         incoming = tangents[end][0]
         curves.extend(
