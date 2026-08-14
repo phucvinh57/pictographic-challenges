@@ -1,12 +1,12 @@
 from pathlib import Path
 
 import cv2
+import numpy as np
 from cv2.typing import MatLike
 from skimage.measure import find_contours
 
+from .geometry import cross_product, distance, offset, signed_angle
 from .types import AxisPoint, Contour
-import numpy as np
-from .geometry import distance, cross_product, signed_angle
 
 
 def _convert_to_grayscale(image: MatLike) -> np.ndarray:
@@ -34,9 +34,9 @@ def read_image(image_path: Path) -> np.ndarray:
 
 
 def extract_contours(image: np.ndarray) -> tuple[Contour, ...]:
-    _, thresh = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    level, _ = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     field = np.pad(
-        (thresh + 0.5) - image.astype(np.float64),
+        (level + 0.5) - image.astype(np.float64),
         1,
         constant_values=-1.0,
     )
@@ -98,7 +98,7 @@ def _limit_penalties(points: list[AxisPoint], tolerance: float = 0.25) -> list[i
         if index == last + 1:
             continue
         maximum = max(
-            _calc_penalty(close_path[last], (close_path[middle], close_path[index]))
+            _calc_penalty(close_path[middle], (close_path[last], close_path[index]))
             for middle in range(last + 1, index)
         )
         if maximum >= tolerance:
@@ -153,7 +153,7 @@ def _get_break_points(
         current = index
         for _ in range(size - 1):
             next = (current + step) % size
-            length = lengths[next]
+            length = lengths[current if step > 0 else next]
             if travelled + length > span_length_threshold:
                 break
             travelled += length
@@ -174,8 +174,7 @@ def _get_break_points(
         breaks.append(
             total_angle >= angle_threshold
             # To detect if bend is sufficiently concentrated
-            and total_angle / total_length
-            >= angle_threshold / span_length_threshold
+            and total_angle * span_length_threshold >= angle_threshold * total_length
         )
     return breaks
 
@@ -195,7 +194,9 @@ def _is_straight_span(
         return False
 
     stop = end if end > start else end + size
-    bow = max(distance(first, points[index % size]) for index in range(start, stop + 1))
+    bow = max(
+        offset(points[index % size], (first, last)) for index in range(start, stop + 1)
+    )
     # See https://en.wikipedia.org/wiki/Sagitta_(geometry)
     return bow <= tolerance and length * length >= 8 * bow * radius
 
@@ -251,19 +252,19 @@ def process_contour(contour: Contour) -> tuple[Contour, tuple[bool, ...]]:
     path = list(contour)
     # A being a closed contour, we need at least 3 points to form a polygon.
     if len(path) < 3:
-        return contour, (False,) * len(contour)
+        return (), ()
 
     # Indices of points that are important to the shape of the contour, after removing collinear points.
     indices = _remove_collinear(path, _limit_penalties(path))
     if len(indices) < 3:
-        return contour, (False,) * len(contour)
+        return (), ()
 
     # Straight flags indicate whether the segment between two consecutive points is straight or not.
     # For example, straight_flags[i] is True if the segment between corners[i] and corners[(i + 1) % len(corners)] is straight.
     kept_indices, straight_flags = _identify_straight_runs(path, indices)
     corners = [contour[i] for i in kept_indices]
 
-    return (*corners, corners[0]), straight_flags
+    return tuple(corners), straight_flags
 
 
 __all__ = ["extract_contours", "process_contour"]

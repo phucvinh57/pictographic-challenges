@@ -1,10 +1,11 @@
+from pathlib import Path
+
 from challenge_1.svg import draw_bezier_svg
 
-from .curve_fitting import fit_closed_contour
-from .contour import extract_contours, process_contour, read_image
 from .args import Args
-from .constants import IN_DIR, IMAGE_SUFFIXES
-from pathlib import Path
+from .constants import IMAGE_SUFFIXES, IN_DIR, OUT_DIR, SMOOTH_TOLERANCE
+from .contour import extract_contours, process_contour, read_image
+from .curve_fitting import fit_closed_contour
 
 
 def convert_to_svg(image_path: Path, angle_threshold: float, debug: bool) -> None:
@@ -17,12 +18,14 @@ def convert_to_svg(image_path: Path, angle_threshold: float, debug: bool) -> Non
         curves = fit_closed_contour(
             simplified_contour,
             straight_flags,
-            tolerance=1.0,
+            tolerance=SMOOTH_TOLERANCE,
             angle_threshold=angle_threshold,
         )
         curves_list.append(curves)
     shape = (int(image.shape[0]), int(image.shape[1]))
-    draw_bezier_svg(shape, curves_list)
+    svg = draw_bezier_svg(shape, curves_list)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    (OUT_DIR / f"{image_path.stem}.svg").write_text(svg)
 
 def main() -> None:
     args = Args.parse()

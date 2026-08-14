@@ -7,7 +7,7 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
-    "numpy>=2.5.1",
+    "numpy>=2.5.2",
     "opencv-contrib-python>=5.0.0.93",
     "scikit-image>=0.26.0",
 ]
@@ -25,5 +25,5 @@ module-name = ["challenge_1"]
 [dependency-groups]
 dev = [
     "pyright>=1.1.411",
-    "ruff>=0.16.1",
+    "ruff>=0.16.3",
 ]
