@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from . import debug
-from .args import Args, get_args, set_args
+from .args import get_args
 from .constants import IMAGE_SUFFIXES
 from .contour import extract_contours, process_contour, read_image_in_gray_scale
 from .curve_fitting import fit_closed_contour
@@ -34,7 +34,6 @@ def convert_to_svg(image_path: Path) -> None:
 
 
 def main() -> None:
-    set_args(Args.parse())
     input_dir = get_args("input_dir").iterdir()
     images = [
         p for p in input_dir if p.suffix.lower() in IMAGE_SUFFIXES
