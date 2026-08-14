@@ -1,5 +1,6 @@
 from itertools import pairwise
 
+from . import debug
 from .args import get_args
 from .geometry import (
     AxisPoint,
@@ -176,6 +177,8 @@ def fit_closed_contour(
     corner_flags = _get_corner_flags(contour)
     cuts = _cut_indices(contour, corner_flags, straight_flags)
     tangents = _cut_tangents(contour, corner_flags, straight_flags, cuts)
+    debug.count("corners", sum(corner_flags))
+    debug.count("cuts", len(cuts))
 
     curves = []
     witness_spacing = min(1.0, max(0.25, tolerance))
@@ -211,6 +214,7 @@ def fit_closed_contour(
             (last.second_control[0] + shift[0], last.second_control[1] + shift[1]),
             curves[0].start,
         )
+    debug.count("fitted curves", len(curves))
     return curves
 
 

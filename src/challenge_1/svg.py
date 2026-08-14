@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from math import hypot
 
+from . import debug
 from .args import get_args
 from .geometry import AxisPoint, BezierCurve
 
@@ -62,6 +63,7 @@ def _path(curves: list[BezierCurve]) -> str:
             commands.append(f'{"" if command == "C" else "C"}{controls}')
             command = "C"
         previous = curve
+        debug.count("svg lines" if command == "L" else "svg cubics")
     if curves[-1].end == curves[0].start:
         commands.append("Z")
     return " ".join(commands)

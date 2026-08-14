@@ -3,14 +3,17 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from cv2.typing import MatLike
 from skimage.measure import find_contours
 
+from . import debug
 from .args import get_args
 from .geometry import Contour, cross_product, distance, offset, signed_angle
 
 
-def _convert_to_grayscale(image: MatLike) -> np.ndarray:
+def read_image_in_gray_scale(image_path: Path) -> np.ndarray:
+    image = cv2.imread(str(image_path), cv2.IMREAD_UNCHANGED)
+    if image is None:
+        raise ValueError(f"Failed to read image: {image_path}")
     if image.ndim == 2:
         return image
 
@@ -30,17 +33,9 @@ def _convert_to_grayscale(image: MatLike) -> np.ndarray:
     return cv2.cvtColor(composited.astype(np.uint8), cv2.COLOR_BGR2GRAY)
 
 
-def read_image(image_path: Path) -> np.ndarray:
-    image = cv2.imread(str(image_path), cv2.IMREAD_UNCHANGED)
-    if image is None:
-        raise ValueError(f"Failed to read image: {image_path}")
-    return _convert_to_grayscale(image)
-
-
 def extract_contours(image: np.ndarray) -> list[Contour]:
     level, _ = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    # Fill the -1.0 background border first, then write the signed field into the
-    # middle, so the whole thing costs one array instead of a subtract-then-pad chain.
+    # Fill the -1.0 background border first, then write the signed field
     field = np.full((image.shape[0] + 2, image.shape[1] + 2), -1.0)
     np.subtract(level + 0.5, image, out=field[1:-1, 1:-1], dtype=np.float64)
 
@@ -238,8 +233,13 @@ def process_contour(contour: Contour) -> tuple[Contour, list[bool]]:
     if len(contour) < 3:
         return [], []
 
+    debug.count("contour points", len(contour))
+
     # Indices of points that are important to the shape of the contour, after removing collinear points.
-    indices = _remove_collinear(contour, _limit_penalties(contour))
+    penalised = _limit_penalties(contour)
+    debug.count("after simplify", len(penalised))
+    indices = _remove_collinear(contour, penalised)
+    debug.count("after collinear removal", len(indices))
     if len(indices) < 3:
         return [], []
 
@@ -247,6 +247,8 @@ def process_contour(contour: Contour) -> tuple[Contour, list[bool]]:
     # For example, straight_flags[i] is True if the segment between corners[i] and corners[(i + 1) % len(corners)] is straight.
     kept_indices, straight_flags = _identify_straight_runs(contour, indices)
     corners = [contour[i] for i in kept_indices]
+    debug.count("after straight runs", len(corners))
+    debug.count("straight segments", sum(straight_flags))
 
     return corners, straight_flags
 
