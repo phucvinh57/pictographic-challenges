@@ -1,4 +1,4 @@
-from math import hypot, sqrt
+from math import hypot
 from pathlib import Path
 
 import cv2
@@ -7,7 +7,14 @@ from skimage.measure import find_contours
 
 from . import debug
 from .args import get_args
-from .geometry import Contour, distance, offset, signed_angle
+from .constants import (
+    BREAK_SPAN_FLOOR,
+    DOMINANT_FLOOR,
+    SIMPLIFY_FLOOR,
+    STRAIGHT_MIN_FLOOR,
+    STRAIGHT_TOLERANCE_FLOOR,
+)
+from .geometry import Contour, distance, offset, perimeter, scaled, signed_angle
 
 
 def read_image_in_gray_scale(image_path: Path) -> np.ndarray:
@@ -63,9 +70,9 @@ def _limit_penalties(contour: Contour) -> list[int]:
 
     A potrace-like approach, which is similar to the Ramer-Douglas-Peucker algorithm.
     """
-    tolerance = get_args().simplify_tolerance
     if len(contour) < 3:
         return list(range(len(contour)))
+    tolerance = scaled(get_args().simplify_ratio, SIMPLIFY_FLOOR, perimeter(contour))
     close_path = [*contour, contour[0]]
     result = [0]
     last = 0
@@ -75,14 +82,17 @@ def _limit_penalties(contour: Contour) -> list[int]:
             continue
         (anchor_x, anchor_y), (head_x, head_y) = close_path[last], close_path[index]
         span_x, span_y = head_x - anchor_x, head_y - anchor_y
-        # A point's penalty is its triangle area squared over the chord, and the
-        # cross product is twice that area, so `penalty >= tolerance` is just
-        # `|cross| >= limit`: no square root per point, and no reason to look past
-        # the first point that breaks it. A zero chord zeroes every penalty, and
-        # the falsy limit short-circuits that case away.
-        limit = sqrt(4 * tolerance * hypot(span_x, span_y))
-        if limit and any(
+        # A point is droppable while it stays within `tolerance` of the chord that
+        # would replace it. The cross product is that distance times the chord, so
+        # comparing against `tolerance * chord` keeps the square root out of the
+        # inner loop. A chord of zero has no line to measure against, so those
+        # points are measured straight from the anchor instead.
+        chord = hypot(span_x, span_y)
+        limit = tolerance * chord
+        if any(
             abs(span_x * (y - anchor_y) - (x - anchor_x) * span_y) >= limit
+            if chord
+            else hypot(x - anchor_x, y - anchor_y) >= tolerance
             for x, y in close_path[last + 1 : index]
         ):
             last = index - 1
@@ -93,9 +103,9 @@ def _limit_penalties(contour: Contour) -> list[int]:
     return reduced if len(reduced) >= 3 else list(range(len(contour)))
 
 
-def _get_break_points(polygon: Contour) -> list[bool]:
+def _get_break_points(polygon: Contour, scale: float) -> list[bool]:
     args = get_args()
-    span_length_threshold = args.break_span_length
+    span_length_threshold = scaled(args.break_span_ratio, BREAK_SPAN_FLOOR, scale)
     angle_threshold = args.break_angle_threshold
     size = len(polygon)
     turns = [
@@ -139,32 +149,33 @@ def _get_break_points(polygon: Contour) -> list[bool]:
     return breaks
 
 
-def _is_straight_span(points: Contour, start: int, end: int) -> bool:
+def _is_straight_span(points: Contour, start: int, end: int, scale: float) -> bool:
     args = get_args()
     size = len(points)
     first, last = points[start], points[end]
     length = distance(first, last)
-    if length < args.straight_min_length:
+    if length < scaled(args.straight_min_ratio, STRAIGHT_MIN_FLOOR, scale):
         return False
 
     stop = end if end > start else end + size
     bow = max(
         offset(points[index % size], (first, last)) for index in range(start, stop + 1)
     )
-    # See https://en.wikipedia.org/wiki/Sagitta_(geometry)
-    return (
-        bow <= args.straight_tolerance
-        and length * length >= 8 * bow * args.straight_radius
-    )
+    # Two ceilings: one against the shape, below which a bow is indistinguishable
+    # from rasterisation noise, and one against the span itself, so that a long
+    # span has to be proportionally as flat as a short one.
+    ceiling = scaled(args.straight_tolerance_ratio, STRAIGHT_TOLERANCE_FLOOR, scale)
+    return bow <= ceiling and bow <= args.straight_bow_ratio * length
 
 
 def _identify_straight_runs(
     contour: Contour,
     indices: list[int],
 ) -> tuple[list[int], list[bool]]:
-    dominant_length = get_args().dominant_length
+    scale = perimeter(contour)
+    dominant_length = scaled(get_args().dominant_ratio, DOMINANT_FLOOR, scale)
     polygon = [contour[i] for i in indices]
-    breaks = _get_break_points(polygon)
+    breaks = _get_break_points(polygon, scale)
     size = len(indices)
 
     for i, point in enumerate(polygon):
@@ -181,6 +192,7 @@ def _identify_straight_runs(
             contour,
             indices[marks[start]],
             indices[marks[stop % len(marks)]],
+            scale,
         )
 
     kept = []

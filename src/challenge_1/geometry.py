@@ -8,9 +8,22 @@ from math import atan2, ceil, degrees, hypot
 AxisPoint = tuple[float, float]
 Contour = list[AxisPoint]
 
+
 def distance(first: AxisPoint, second: AxisPoint) -> float:
     """|AB|"""
     return hypot(second[0] - first[0], second[1] - first[1])
+
+
+def perimeter(points: Sequence[AxisPoint]) -> float:
+    """Total length of the closed ring through `points`."""
+    return sum(distance(first, second) for first, second in pairwise(points)) + (
+        distance(points[-1], points[0]) if len(points) > 1 else 0.0
+    )
+
+
+def scaled(ratio: float, floor: float, scale: float) -> float:
+    """A threshold as a fraction of a shape's size, never below a pixel floor."""
+    return max(floor, ratio * scale)
 
 
 def cross_product(a: AxisPoint, b: AxisPoint, c: AxisPoint) -> float:

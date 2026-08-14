@@ -6,18 +6,18 @@ from pathlib import Path
 
 from .constants import (
     BREAK_ANGLE_THRESHOLD,
-    BREAK_SPAN_LENGTH,
+    BREAK_SPAN_RATIO,
     CORNER_ANGLE_THRESHOLD,
-    DOMINANT_LENGTH,
-    FIT_TOLERANCE,
+    DOMINANT_RATIO,
+    FIT_RATIO,
     IN_DIR,
     LINE_TOLERANCE,
     OUT_DIR,
-    SIMPLIFY_TOLERANCE,
-    STRAIGHT_MIN_LENGTH,
-    STRAIGHT_RADIUS,
-    STRAIGHT_TOLERANCE,
-    TANGENT_SPAN,
+    SIMPLIFY_RATIO,
+    STRAIGHT_BOW_RATIO,
+    STRAIGHT_MIN_RATIO,
+    STRAIGHT_TOLERANCE_RATIO,
+    TANGENT_SPAN_RATIO,
 )
 
 
@@ -35,6 +35,13 @@ def _non_negative(value: str) -> float:
     return number
 
 
+def _ratio(value: str) -> float:
+    number = float(value)
+    if not 0 < number <= 1:
+        raise ArgumentTypeError(f"must be a fraction in (0, 1], got {value}")
+    return number
+
+
 def _angle(value: str) -> float:
     number = float(value)
     if not 0 <= number <= 180:
@@ -47,19 +54,19 @@ class Args:
     input_dir: Path
     output_dir: Path
 
-    simplify_tolerance: float
+    simplify_ratio: float
 
-    break_span_length: float
+    break_span_ratio: float
     break_angle_threshold: float
 
-    straight_min_length: float
-    straight_tolerance: float
-    straight_radius: float
-    dominant_length: float
+    straight_min_ratio: float
+    straight_tolerance_ratio: float
+    straight_bow_ratio: float
+    dominant_ratio: float
 
     corner_angle_threshold: float
-    fit_tolerance: float
-    tangent_span: float
+    fit_ratio: float
+    tangent_span_ratio: float
 
     line_tolerance: float
 
@@ -75,18 +82,19 @@ class Args:
 
         simplify = parser.add_argument_group("contour simplification")
         simplify.add_argument(
-            "--simplify-tolerance",
-            type=_positive,
-            default=SIMPLIFY_TOLERANCE,
-            help="Penalty budget when dropping points from a contour",
+            "--simplify-ratio",
+            type=_ratio,
+            default=SIMPLIFY_RATIO,
+            help="How far a dropped point may stray from the chord replacing it, "
+            "as a fraction of perimeter",
         )
 
         breaks = parser.add_argument_group("corner detection")
         breaks.add_argument(
-            "--break-span-length",
-            type=_positive,
-            default=BREAK_SPAN_LENGTH,
-            help="Arc length looked at on each side of a vertex",
+            "--break-span-ratio",
+            type=_ratio,
+            default=BREAK_SPAN_RATIO,
+            help="Arc looked at on each side of a vertex, as a fraction of perimeter",
         )
         breaks.add_argument(
             "--break-angle-threshold",
@@ -97,28 +105,28 @@ class Args:
 
         straight = parser.add_argument_group("straight runs")
         straight.add_argument(
-            "--straight-min-length",
-            type=_positive,
-            default=STRAIGHT_MIN_LENGTH,
-            help="Shortest span that may be called straight",
+            "--straight-min-ratio",
+            type=_ratio,
+            default=STRAIGHT_MIN_RATIO,
+            help="Shortest straight span, as a fraction of perimeter",
         )
         straight.add_argument(
-            "--straight-tolerance",
-            type=_positive,
-            default=STRAIGHT_TOLERANCE,
-            help="Largest bow allowed inside a straight span",
+            "--straight-tolerance-ratio",
+            type=_ratio,
+            default=STRAIGHT_TOLERANCE_RATIO,
+            help="Largest bow inside a straight span, as a fraction of perimeter",
         )
         straight.add_argument(
-            "--straight-radius",
-            type=_positive,
-            default=STRAIGHT_RADIUS,
-            help="Smallest curvature radius still treated as straight",
+            "--straight-bow-ratio",
+            type=_ratio,
+            default=STRAIGHT_BOW_RATIO,
+            help="Largest bow allowed inside a straight span, relative to its length",
         )
         straight.add_argument(
-            "--dominant-length",
-            type=_positive,
-            default=DOMINANT_LENGTH,
-            help="Edge length that always forces a break at both ends",
+            "--dominant-ratio",
+            type=_ratio,
+            default=DOMINANT_RATIO,
+            help="Edge that forces a break at both ends, as a fraction of perimeter",
         )
 
         fitting = parser.add_argument_group("curve fitting")
@@ -131,16 +139,17 @@ class Args:
         )
         fitting.add_argument(
             "-t",
-            "--fit-tolerance",
-            type=_positive,
-            default=FIT_TOLERANCE,
-            help="Largest deviation allowed between a curve and the contour",
+            "--fit-ratio",
+            type=_ratio,
+            default=FIT_RATIO,
+            help="Largest deviation between a curve and the contour, "
+            "as a fraction of perimeter",
         )
         fitting.add_argument(
-            "--tangent-span",
-            type=_positive,
-            default=TANGENT_SPAN,
-            help="Arc length used to estimate a tangent at a cut",
+            "--tangent-span-ratio",
+            type=_ratio,
+            default=TANGENT_SPAN_RATIO,
+            help="Arc used to estimate a tangent at a cut, as a fraction of perimeter",
         )
 
         output = parser.add_argument_group("svg output")

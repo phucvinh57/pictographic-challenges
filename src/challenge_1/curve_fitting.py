@@ -2,6 +2,7 @@ from itertools import pairwise
 
 from . import debug
 from .args import get_args
+from .constants import FIT_FLOOR, TANGENT_SPAN_FLOOR
 from .geometry import (
     AxisPoint,
     BezierCurve,
@@ -12,6 +13,8 @@ from .geometry import (
     fit_error,
     generate_bezier,
     line_curve,
+    perimeter,
+    scaled,
     signed_angle,
     unit,
 )
@@ -80,7 +83,7 @@ def _cut_tangents(
     the join between them smooth.
     """
     tangents = {}
-    span = get_args().tangent_span
+    span = scaled(get_args().tangent_span_ratio, TANGENT_SPAN_FLOOR, perimeter(contour))
     size = len(contour)
     for index in cuts:
         point = contour[index]
@@ -173,7 +176,7 @@ def fit_closed_contour(
     if size < 3:
         return []
 
-    tolerance = get_args().fit_tolerance
+    tolerance = scaled(get_args().fit_ratio, FIT_FLOOR, perimeter(contour))
     corner_flags = _get_corner_flags(contour)
     cuts = _cut_indices(contour, corner_flags, straight_flags)
     tangents = _cut_tangents(contour, corner_flags, straight_flags, cuts)
