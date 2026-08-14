@@ -5,7 +5,6 @@ IN_DIR = Path("input/challenge_1")
 OUT_DIR = Path("output/challenge_1")
 
 SIMPLIFY_TOLERANCE = 0.25
-COLLINEAR_EPSILON = 1e-9
 
 BREAK_SPAN_LENGTH = 12.0
 BREAK_ANGLE_THRESHOLD = 30.0

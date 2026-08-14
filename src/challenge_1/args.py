@@ -7,7 +7,6 @@ from pathlib import Path
 from .constants import (
     BREAK_ANGLE_THRESHOLD,
     BREAK_SPAN_LENGTH,
-    COLLINEAR_EPSILON,
     CORNER_ANGLE_THRESHOLD,
     DOMINANT_LENGTH,
     FIT_TOLERANCE,
@@ -49,7 +48,6 @@ class Args:
     output_dir: Path
 
     simplify_tolerance: float
-    collinear_epsilon: float
 
     break_span_length: float
     break_angle_threshold: float
@@ -81,12 +79,6 @@ class Args:
             type=_positive,
             default=SIMPLIFY_TOLERANCE,
             help="Penalty budget when dropping points from a contour",
-        )
-        simplify.add_argument(
-            "--collinear-epsilon",
-            type=_positive,
-            default=COLLINEAR_EPSILON,
-            help="Cross product below which three points count as collinear",
         )
 
         breaks = parser.add_argument_group("corner detection")

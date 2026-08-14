@@ -7,7 +7,7 @@ from skimage.measure import find_contours
 
 from . import debug
 from .args import get_args
-from .geometry import Contour, cross_product, distance, offset, signed_angle
+from .geometry import Contour, distance, offset, signed_angle
 
 
 def read_image_in_gray_scale(image_path: Path) -> np.ndarray:
@@ -91,29 +91,6 @@ def _limit_penalties(contour: Contour) -> list[int]:
             result.append(index)
     reduced = result[:-1] if len(result) > 1 else result
     return reduced if len(reduced) >= 3 else list(range(len(contour)))
-
-
-def _remove_collinear(points: Contour, indices: list[int]) -> list[int]:
-    """If three consecutive points are collinear, remove the middle one."""
-    epsilon = get_args().collinear_epsilon
-    current = indices
-    while len(current) > 3:
-        reduced = [
-            index
-            for position, index in enumerate(current)
-            if abs(
-                cross_product(
-                    points[current[position - 1]],
-                    points[index],
-                    points[current[(position + 1) % len(current)]],
-                )
-            )
-            > epsilon
-        ]
-        if len(reduced) < 3 or len(reduced) == len(current):
-            break
-        current = reduced
-    return current
 
 
 def _get_break_points(polygon: Contour) -> list[bool]:
@@ -235,11 +212,9 @@ def process_contour(contour: Contour) -> tuple[Contour, list[bool]]:
 
     debug.count("contour points", len(contour))
 
-    # Indices of points that are important to the shape of the contour, after removing collinear points.
-    penalised = _limit_penalties(contour)
-    debug.count("after simplify", len(penalised))
-    indices = _remove_collinear(contour, penalised)
-    debug.count("after collinear removal", len(indices))
+    # Indices of points that are important to the shape of the contour.
+    indices = _limit_penalties(contour)
+    debug.count("after simplify", len(indices))
     if len(indices) < 3:
         return [], []
 
