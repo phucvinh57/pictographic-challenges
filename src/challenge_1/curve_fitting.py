@@ -22,7 +22,7 @@ from .geometry import (
 
 def _get_corner_flags(contour: Contour) -> list[bool]:
     """Say which of a closed path's vertices the path turns a corner at."""
-    angle_threshold = get_args().corner_angle_threshold
+    angle_threshold = get_args("corner_angle_threshold")
     if len(contour) < 3:
         return []
     return [
@@ -83,7 +83,9 @@ def _cut_tangents(
     the join between them smooth.
     """
     tangents = {}
-    span = scaled(get_args().tangent_span_ratio, TANGENT_SPAN_FLOOR, perimeter(contour))
+    span = scaled(
+        get_args("tangent_span_ratio"), TANGENT_SPAN_FLOOR, perimeter(contour)
+    )
     size = len(contour)
     for index in cuts:
         point = contour[index]
@@ -176,7 +178,7 @@ def fit_closed_contour(
     if size < 3:
         return []
 
-    tolerance = scaled(get_args().fit_ratio, FIT_FLOOR, perimeter(contour))
+    tolerance = scaled(get_args("fit_ratio"), FIT_FLOOR, perimeter(contour))
     corner_flags = _get_corner_flags(contour)
     cuts = _cut_indices(contour, corner_flags, straight_flags)
     tangents = _cut_tangents(contour, corner_flags, straight_flags, cuts)

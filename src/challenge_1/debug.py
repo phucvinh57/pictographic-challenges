@@ -13,7 +13,7 @@ _started = 0.0
 
 
 def enabled() -> bool:
-    return get_args().debug
+    return get_args("debug")
 
 
 def begin(title: str) -> None:

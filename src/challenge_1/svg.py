@@ -16,7 +16,7 @@ def _point(point: AxisPoint) -> str:
 
 
 def _straight(curve: BezierCurve) -> bool:
-    tolerance = get_args().line_tolerance
+    tolerance = get_args("line_tolerance")
     dx = curve.end[0] - curve.start[0]
     dy = curve.end[1] - curve.start[1]
     length = hypot(dx, dy)

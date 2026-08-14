@@ -3,6 +3,7 @@ from __future__ import annotations
 from argparse import ArgumentParser, ArgumentTypeError
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal, overload
 
 from .constants import (
     BREAK_ANGLE_THRESHOLD,
@@ -167,15 +168,41 @@ class Args:
         return cls(**vars(parser.parse_args(argv)))
 
 
+PathField = Literal["input_dir", "output_dir"]
+FloatField = Literal[
+    "simplify_ratio",
+    "break_span_ratio",
+    "break_angle_threshold",
+    "straight_min_ratio",
+    "straight_tolerance_ratio",
+    "straight_bow_ratio",
+    "dominant_ratio",
+    "corner_angle_threshold",
+    "fit_ratio",
+    "tangent_span_ratio",
+    "line_tolerance",
+]
+BoolField = Literal["debug"]
+
 _args: Args | None = None
 
 
-def get_args() -> Args:
+@overload
+def get_args() -> Args: ...
+@overload
+def get_args(field: PathField) -> Path: ...
+@overload
+def get_args(field: FloatField) -> float: ...
+@overload
+def get_args(field: BoolField) -> bool: ...
+def get_args(
+    field: PathField | FloatField | BoolField | None = None,
+) -> Args | Path | float | bool:
     """The parsed arguments, parsed once on first use and shared after that."""
     global _args
     if _args is None:
         _args = Args.parse()
-    return _args
+    return _args if field is None else getattr(_args, field)
 
 
 def set_args(args: Args) -> None:

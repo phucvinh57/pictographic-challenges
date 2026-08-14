@@ -72,7 +72,7 @@ def _limit_penalties(contour: Contour) -> list[int]:
     """
     if len(contour) < 3:
         return list(range(len(contour)))
-    tolerance = scaled(get_args().simplify_ratio, SIMPLIFY_FLOOR, perimeter(contour))
+    tolerance = scaled(get_args("simplify_ratio"), SIMPLIFY_FLOOR, perimeter(contour))
     close_path = [*contour, contour[0]]
     result = [0]
     last = 0
@@ -104,9 +104,10 @@ def _limit_penalties(contour: Contour) -> list[int]:
 
 
 def _get_break_points(polygon: Contour, scale: float) -> list[bool]:
-    args = get_args()
-    span_length_threshold = scaled(args.break_span_ratio, BREAK_SPAN_FLOOR, scale)
-    angle_threshold = args.break_angle_threshold
+    span_length_threshold = scaled(
+        get_args("break_span_ratio"), BREAK_SPAN_FLOOR, scale
+    )
+    angle_threshold = get_args("break_angle_threshold")
     size = len(polygon)
     turns = [
         signed_angle(polygon[index - 1], point, polygon[(index + 1) % size])
@@ -150,11 +151,10 @@ def _get_break_points(polygon: Contour, scale: float) -> list[bool]:
 
 
 def _is_straight_span(points: Contour, start: int, end: int, scale: float) -> bool:
-    args = get_args()
     size = len(points)
     first, last = points[start], points[end]
     length = distance(first, last)
-    if length < scaled(args.straight_min_ratio, STRAIGHT_MIN_FLOOR, scale):
+    if length < scaled(get_args("straight_min_ratio"), STRAIGHT_MIN_FLOOR, scale):
         return False
 
     stop = end if end > start else end + size
@@ -164,8 +164,10 @@ def _is_straight_span(points: Contour, start: int, end: int, scale: float) -> bo
     # Two ceilings: one against the shape, below which a bow is indistinguishable
     # from rasterisation noise, and one against the span itself, so that a long
     # span has to be proportionally as flat as a short one.
-    ceiling = scaled(args.straight_tolerance_ratio, STRAIGHT_TOLERANCE_FLOOR, scale)
-    return bow <= ceiling and bow <= args.straight_bow_ratio * length
+    ceiling = scaled(
+        get_args("straight_tolerance_ratio"), STRAIGHT_TOLERANCE_FLOOR, scale
+    )
+    return bow <= ceiling and bow <= get_args("straight_bow_ratio") * length
 
 
 def _identify_straight_runs(
@@ -173,7 +175,7 @@ def _identify_straight_runs(
     indices: list[int],
 ) -> tuple[list[int], list[bool]]:
     scale = perimeter(contour)
-    dominant_length = scaled(get_args().dominant_ratio, DOMINANT_FLOOR, scale)
+    dominant_length = scaled(get_args("dominant_ratio"), DOMINANT_FLOOR, scale)
     polygon = [contour[i] for i in indices]
     breaks = _get_break_points(polygon, scale)
     size = len(indices)
