@@ -1,3 +1,4 @@
+from math import hypot, sqrt
 from pathlib import Path
 
 import cv2
@@ -19,12 +20,15 @@ def _convert_to_grayscale(image: MatLike) -> np.ndarray:
     if image.shape[2] == 3:
         return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
 
-    color = image[:, :, :3].astype(np.float64)
+    # Composite over white in place: multiplying the uint8 colors by the float
+    # alpha promotes straight to float64, so the colors never need their own copy.
     alpha = image[:, :, 3:4].astype(np.float64) / 255.0
-    composited = color * alpha + 255.0 * (1.0 - alpha)
-    composited = np.rint(composited).astype(np.uint8)
+    composited = image[:, :, :3] * alpha
+    composited += 255.0 * (1.0 - alpha)
+    np.rint(composited, out=composited)
 
-    return cv2.cvtColor(composited, cv2.COLOR_BGR2GRAY)
+    return cv2.cvtColor(composited.astype(np.uint8), cv2.COLOR_BGR2GRAY)
+
 
 def read_image(image_path: Path) -> np.ndarray:
     image = cv2.imread(str(image_path), cv2.IMREAD_UNCHANGED)
@@ -35,11 +39,10 @@ def read_image(image_path: Path) -> np.ndarray:
 
 def extract_contours(image: np.ndarray) -> tuple[Contour, ...]:
     level, _ = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    field = np.pad(
-        (level + 0.5) - image.astype(np.float64),
-        1,
-        constant_values=-1.0,
-    )
+    # Fill the -1.0 background border first, then write the signed field into the
+    # middle, so the whole thing costs one array instead of a subtract-then-pad chain.
+    field = np.full((image.shape[0] + 2, image.shape[1] + 2), -1.0)
+    np.subtract(level + 0.5, image, out=field[1:-1, 1:-1], dtype=np.float64)
 
     contours: list[Contour] = []
     for contour in find_contours(
@@ -50,9 +53,7 @@ def extract_contours(image: np.ndarray) -> tuple[Contour, ...]:
     ):
         # scikit-image returns (row, column); the SVG pipeline uses (x, y).
         # The 0.5 offset is to center the contour on the pixel grid.
-        points = tuple(
-            (float(column - 0.5), float(row - 0.5)) for row, column in contour
-        )
+        points = tuple(map(tuple, (contour[:, ::-1] - 0.5).tolist()))
         if len(points) > 1 and points[0] == points[-1]:
             points = points[:-1]
         if len(points) >= 4:
@@ -60,54 +61,40 @@ def extract_contours(image: np.ndarray) -> tuple[Contour, ...]:
     return tuple(contours)
 
 
-def _calc_penalty(point: AxisPoint, line: tuple[AxisPoint, AxisPoint]) -> float:
-    """Calculate the distance from a point to a line defined by two points."""
-    first, last = line
-    a = distance(first, point)
-    b = distance(point, last)
-    chord = distance(first, last)
-    if chord == 0:
-        return 0.0
-    semiperimeter = (a + b + chord) / 2
-    # Using Heron's formula to calculate the area of the triangle formed by the three points
-    area_squared = max(
-        0.0,
-        semiperimeter
-        * (semiperimeter - a)
-        * (semiperimeter - b)
-        * (semiperimeter - chord),
-    )
-    # S^2 / chord
-    return area_squared / chord
-
-
-def _limit_penalties(points: list[AxisPoint], tolerance: float = 0.25) -> list[int]:
+def _limit_penalties(contour: list[AxisPoint], tolerance: float = 0.25) -> list[int]:
     """
     To reduce a closed contour to a smaller set of important points,
     while preserving points where the contour has significant curvature/change.
 
     A potrace-like approach, which is similar to the Ramer-Douglas-Peucker algorithm.
     """
-    if len(points) < 3:
-        return list(range(len(points)))
-    close_path = [*points, points[0]]
+    if len(contour) < 3:
+        return list(range(len(contour)))
+    close_path = [*contour, contour[0]]
     result = [0]
     last = 0
 
     for index in range(1, len(close_path)):
         if index == last + 1:
             continue
-        maximum = max(
-            _calc_penalty(close_path[middle], (close_path[last], close_path[index]))
-            for middle in range(last + 1, index)
-        )
-        if maximum >= tolerance:
+        (anchor_x, anchor_y), (head_x, head_y) = close_path[last], close_path[index]
+        span_x, span_y = head_x - anchor_x, head_y - anchor_y
+        # A point's penalty is its triangle area squared over the chord, and the
+        # cross product is twice that area, so `penalty >= tolerance` is just
+        # `|cross| >= limit`: no square root per point, and no reason to look past
+        # the first point that breaks it. A zero chord zeroes every penalty, and
+        # the falsy limit short-circuits that case away.
+        limit = sqrt(4 * tolerance * hypot(span_x, span_y))
+        if limit and any(
+            abs(span_x * (y - anchor_y) - (x - anchor_x) * span_y) >= limit
+            for x, y in close_path[last + 1 : index]
+        ):
             last = index - 1
             result.append(last)
         if index == len(close_path) - 1:
             result.append(index)
     reduced = result[:-1] if len(result) > 1 else result
-    return reduced if len(reduced) >= 3 else list(range(len(points)))
+    return reduced if len(reduced) >= 3 else list(range(len(contour)))
 
 
 def _remove_collinear(points: list[AxisPoint], indices: list[int]) -> list[int]:

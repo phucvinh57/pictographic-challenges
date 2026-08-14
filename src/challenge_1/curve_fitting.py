@@ -1,6 +1,16 @@
 from itertools import pairwise
 
-from .geometry import BezierCurve, chord_parameters, densify, distance, fit_error, generate_bezier, line_curve, signed_angle, unit
+from .geometry import (
+    BezierCurve,
+    chord_parameters,
+    densify,
+    distance,
+    fit_error,
+    generate_bezier,
+    line_curve,
+    signed_angle,
+    unit,
+)
 from .types import AxisPoint, Contour
 
 

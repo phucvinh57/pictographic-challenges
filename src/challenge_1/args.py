@@ -8,7 +8,7 @@ class Args:
     debug: bool
 
     @classmethod
-    def parse(cls) -> "Args":
+    def parse(cls) -> Args:
         parser = ArgumentParser(description="Challenge 1")
 
         parser.add_argument("-a", "--angle-threshold", type=float, default=60.0)

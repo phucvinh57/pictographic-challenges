@@ -70,26 +70,6 @@ def densify(points: Sequence[AxisPoint], spacing: float) -> tuple[AxisPoint, ...
     return tuple(dense)
 
 
-def evaluate(curve: BezierCurve, parameter: float) -> AxisPoint:
-    remaining = 1 - parameter
-    weights = (
-        remaining**3,
-        3 * remaining * remaining * parameter,
-        3 * remaining * parameter * parameter,
-        parameter**3,
-    )
-    controls = (
-        curve.start,
-        curve.first_control,
-        curve.second_control,
-        curve.end,
-    )
-    return (
-        sum(weight * point[0] for weight, point in zip(weights, controls)),
-        sum(weight * point[1] for weight, point in zip(weights, controls)),
-    )
-
-
 def chord_parameters(points: Sequence[AxisPoint]) -> list[float]:
     """Assign each point a 0 to 1 parameter proportional to arc length."""
     values = [0.0]
@@ -157,13 +137,35 @@ def fit_error(
     curve: BezierCurve,
 ) -> tuple[float, int]:
     """Worst squared deviation from the curve, and where it happens."""
+    (start_x, start_y) = curve.start
+    (first_x, first_y) = curve.first_control
+    (second_x, second_y) = curve.second_control
+    (end_x, end_y) = curve.end
     maximum = 0.0
     split = len(points) // 2
     for index in range(1, len(points) - 1):
-        fitted = evaluate(curve, parameters[index])
-        error = (fitted[0] - points[index][0]) ** 2 + (
-            fitted[1] - points[index][1]
-        ) ** 2
+        # The cubic evaluated at this point's parameter, inlined so the control
+        # points are unpacked once rather than on every sample.
+        parameter = parameters[index]
+        remaining = 1 - parameter
+        start_weight = remaining**3
+        first_weight = 3 * remaining * remaining * parameter
+        second_weight = 3 * remaining * parameter * parameter
+        end_weight = parameter**3
+        point_x, point_y = points[index]
+        gap_x = (
+            start_weight * start_x
+            + first_weight * first_x
+            + second_weight * second_x
+            + end_weight * end_x
+        ) - point_x
+        gap_y = (
+            start_weight * start_y
+            + first_weight * first_y
+            + second_weight * second_y
+            + end_weight * end_y
+        ) - point_y
+        error = gap_x * gap_x + gap_y * gap_y
         if error >= maximum:
             maximum = error
             split = index

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
 from math import hypot
 
 from .geometry import AxisPoint, BezierCurve
