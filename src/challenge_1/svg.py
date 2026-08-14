@@ -39,7 +39,7 @@ def _same_direction(first: BezierCurve, second: BezierCurve) -> bool:
     return bool(lengths and abs(cross) <= 1e-9 * lengths and dot > 0)
 
 
-def _path(curves: tuple[BezierCurve, ...]) -> str:
+def _path(curves: list[BezierCurve]) -> str:
     commands = [f"M{_point(curves[0].start)}"]
     previous: BezierCurve | None = None
     command = ""
@@ -69,7 +69,7 @@ def _path(curves: tuple[BezierCurve, ...]) -> str:
 
 def draw_bezier_svg(
     shape: tuple[int, int],
-    contours: list[tuple[BezierCurve, ...]],
+    contours: list[list[BezierCurve]],
 ) -> str:
     height, width = shape
     path = " ".join(_path(curves) for curves in contours if curves)

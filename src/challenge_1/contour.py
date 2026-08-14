@@ -7,7 +7,7 @@ from cv2.typing import MatLike
 from skimage.measure import find_contours
 
 from .args import get_args
-from .geometry import cross_product, distance, offset, signed_angle, AxisPoint, Contour
+from .geometry import Contour, cross_product, distance, offset, signed_angle
 
 
 def _convert_to_grayscale(image: MatLike) -> np.ndarray:
@@ -37,7 +37,7 @@ def read_image(image_path: Path) -> np.ndarray:
     return _convert_to_grayscale(image)
 
 
-def extract_contours(image: np.ndarray) -> tuple[Contour, ...]:
+def extract_contours(image: np.ndarray) -> list[Contour]:
     level, _ = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     # Fill the -1.0 background border first, then write the signed field into the
     # middle, so the whole thing costs one array instead of a subtract-then-pad chain.
@@ -53,15 +53,15 @@ def extract_contours(image: np.ndarray) -> tuple[Contour, ...]:
     ):
         # scikit-image returns (row, column); the SVG pipeline uses (x, y).
         # The 0.5 offset is to center the contour on the pixel grid.
-        points = tuple(map(tuple, (contour[:, ::-1] - 0.5).tolist()))
+        points: Contour = [(x, y) for x, y in (contour[:, ::-1] - 0.5).tolist()]
         if len(points) > 1 and points[0] == points[-1]:
-            points = points[:-1]
+            points.pop()
         if len(points) >= 4:
             contours.append(points)
-    return tuple(contours)
+    return contours
 
 
-def _limit_penalties(contour: list[AxisPoint]) -> list[int]:
+def _limit_penalties(contour: Contour) -> list[int]:
     """
     To reduce a closed contour to a smaller set of important points,
     while preserving points where the contour has significant curvature/change.
@@ -98,7 +98,7 @@ def _limit_penalties(contour: list[AxisPoint]) -> list[int]:
     return reduced if len(reduced) >= 3 else list(range(len(contour)))
 
 
-def _remove_collinear(points: list[AxisPoint], indices: list[int]) -> list[int]:
+def _remove_collinear(points: Contour, indices: list[int]) -> list[int]:
     """If three consecutive points are collinear, remove the middle one."""
     epsilon = get_args().collinear_epsilon
     current = indices
@@ -121,7 +121,7 @@ def _remove_collinear(points: list[AxisPoint], indices: list[int]) -> list[int]:
     return current
 
 
-def _get_break_points(polygon: list[AxisPoint]) -> list[bool]:
+def _get_break_points(polygon: Contour) -> list[bool]:
     args = get_args()
     span_length_threshold = args.break_span_length
     angle_threshold = args.break_angle_threshold
@@ -167,7 +167,7 @@ def _get_break_points(polygon: list[AxisPoint]) -> list[bool]:
     return breaks
 
 
-def _is_straight_span(points: list[AxisPoint], start: int, end: int) -> bool:
+def _is_straight_span(points: Contour, start: int, end: int) -> bool:
     args = get_args()
     size = len(points)
     first, last = points[start], points[end]
@@ -187,9 +187,9 @@ def _is_straight_span(points: list[AxisPoint], start: int, end: int) -> bool:
 
 
 def _identify_straight_runs(
-    contour: list[AxisPoint],
+    contour: Contour,
     indices: list[int],
-) -> tuple[list[int], tuple[bool, ...]]:
+) -> tuple[list[int], list[bool]]:
     dominant_length = get_args().dominant_length
     polygon = [contour[i] for i in indices]
     breaks = _get_break_points(polygon)
@@ -202,7 +202,7 @@ def _identify_straight_runs(
     marks = [i for i in range(size) if breaks[i]]
 
     if not marks:
-        return indices, (False,) * size
+        return indices, [False] * size
 
     def is_straight(start: int, stop: int) -> bool:
         return _is_straight_span(
@@ -230,26 +230,25 @@ def _identify_straight_runs(
                 flags.append(False)
                 step += 1
         i = end
-    return kept, tuple(flags)
+    return kept, flags
 
 
-def process_contour(contour: Contour) -> tuple[Contour, tuple[bool, ...]]:
-    path = list(contour)
+def process_contour(contour: Contour) -> tuple[Contour, list[bool]]:
     # A being a closed contour, we need at least 3 points to form a polygon.
-    if len(path) < 3:
-        return (), ()
+    if len(contour) < 3:
+        return [], []
 
     # Indices of points that are important to the shape of the contour, after removing collinear points.
-    indices = _remove_collinear(path, _limit_penalties(path))
+    indices = _remove_collinear(contour, _limit_penalties(contour))
     if len(indices) < 3:
-        return (), ()
+        return [], []
 
     # Straight flags indicate whether the segment between two consecutive points is straight or not.
     # For example, straight_flags[i] is True if the segment between corners[i] and corners[(i + 1) % len(corners)] is straight.
-    kept_indices, straight_flags = _identify_straight_runs(path, indices)
+    kept_indices, straight_flags = _identify_straight_runs(contour, indices)
     corners = [contour[i] for i in kept_indices]
 
-    return tuple(corners), straight_flags
+    return corners, straight_flags
 
 
 __all__ = ["extract_contours", "process_contour"]

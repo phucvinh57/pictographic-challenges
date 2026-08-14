@@ -6,7 +6,7 @@ from itertools import pairwise
 from math import atan2, ceil, degrees, hypot
 
 AxisPoint = tuple[float, float]
-Contour = tuple[AxisPoint, ...]
+Contour = list[AxisPoint]
 
 def distance(first: AxisPoint, second: AxisPoint) -> float:
     """|AB|"""
@@ -54,7 +54,7 @@ def offset(point: AxisPoint, line: tuple[AxisPoint, AxisPoint]) -> float:
     return abs(cross_product(start, end, point)) / length
 
 
-def densify(points: Sequence[AxisPoint], spacing: float) -> tuple[AxisPoint, ...]:
+def densify(points: Sequence[AxisPoint], spacing: float) -> list[AxisPoint]:
     """Resample a polyline so no segment is longer than `spacing`."""
     dense = [points[0]]
     for start, end in pairwise(points):
@@ -67,7 +67,7 @@ def densify(points: Sequence[AxisPoint], spacing: float) -> tuple[AxisPoint, ...
             )
             for index in range(1, divisions + 1)
         )
-    return tuple(dense)
+    return dense
 
 
 def chord_parameters(points: Sequence[AxisPoint]) -> list[float]:
