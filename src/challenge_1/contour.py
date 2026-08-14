@@ -26,16 +26,17 @@ def _convert_to_grayscale(image: MatLike) -> np.ndarray:
 
     return cv2.cvtColor(composited, cv2.COLOR_BGR2GRAY)
 
-
-def extract_contours(image_path: Path) -> tuple[Contour, ...]:
+def read_image(image_path: Path) -> np.ndarray:
     image = cv2.imread(str(image_path), cv2.IMREAD_UNCHANGED)
     if image is None:
         raise ValueError(f"Failed to read image: {image_path}")
-    gray_image = _convert_to_grayscale(image)
-    _, thresh = cv2.threshold(gray_image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return _convert_to_grayscale(image)
 
+
+def extract_contours(image: np.ndarray) -> tuple[Contour, ...]:
+    _, thresh = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     field = np.pad(
-        (thresh + 0.5) - gray_image.astype(np.float64),
+        (thresh + 0.5) - image.astype(np.float64),
         1,
         constant_values=-1.0,
     )
@@ -247,7 +248,6 @@ def _identify_straight_runs(
 
 
 def process_contour(contour: Contour) -> tuple[Contour, tuple[bool, ...]]:
-
     path = list(contour)
     # A being a closed contour, we need at least 3 points to form a polygon.
     if len(path) < 3:

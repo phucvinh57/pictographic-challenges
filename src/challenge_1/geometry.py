@@ -54,20 +54,6 @@ def offset(point: AxisPoint, line: tuple[AxisPoint, AxisPoint]) -> float:
     return abs(cross_product(start, end, point)) / length
 
 
-def walk(points: Sequence[AxisPoint], index: int, step: int, span: float) -> AxisPoint:
-    """Follow the ring from a vertex until `span` of arc length is covered."""
-    size = len(points)
-    current = index
-    travelled = 0.0
-    for _ in range(size - 1):
-        following = (current + step) % size
-        travelled += distance(points[current], points[following])
-        current = following
-        if travelled >= span:
-            break
-    return points[current]
-
-
 def densify(points: Sequence[AxisPoint], spacing: float) -> tuple[AxisPoint, ...]:
     """Resample a polyline so no segment is longer than `spacing`."""
     dense = [points[0]]
