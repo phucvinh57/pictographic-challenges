@@ -6,6 +6,7 @@ import numpy as np
 from cv2.typing import MatLike
 from skimage.measure import find_contours
 
+from .args import get_args
 from .geometry import cross_product, distance, offset, signed_angle
 from .types import AxisPoint, Contour
 
@@ -61,13 +62,14 @@ def extract_contours(image: np.ndarray) -> tuple[Contour, ...]:
     return tuple(contours)
 
 
-def _limit_penalties(contour: list[AxisPoint], tolerance: float = 0.25) -> list[int]:
+def _limit_penalties(contour: list[AxisPoint]) -> list[int]:
     """
     To reduce a closed contour to a smaller set of important points,
     while preserving points where the contour has significant curvature/change.
 
     A potrace-like approach, which is similar to the Ramer-Douglas-Peucker algorithm.
     """
+    tolerance = get_args().simplify_tolerance
     if len(contour) < 3:
         return list(range(len(contour)))
     close_path = [*contour, contour[0]]
@@ -99,6 +101,7 @@ def _limit_penalties(contour: list[AxisPoint], tolerance: float = 0.25) -> list[
 
 def _remove_collinear(points: list[AxisPoint], indices: list[int]) -> list[int]:
     """If three consecutive points are collinear, remove the middle one."""
+    epsilon = get_args().collinear_epsilon
     current = indices
     while len(current) > 3:
         reduced = [
@@ -111,7 +114,7 @@ def _remove_collinear(points: list[AxisPoint], indices: list[int]) -> list[int]:
                     points[current[(position + 1) % len(current)]],
                 )
             )
-            > 1e-9
+            > epsilon
         ]
         if len(reduced) < 3 or len(reduced) == len(current):
             break
@@ -119,11 +122,10 @@ def _remove_collinear(points: list[AxisPoint], indices: list[int]) -> list[int]:
     return current
 
 
-def _get_break_points(
-    polygon: list[AxisPoint],
-    span_length_threshold: float = 12.0,
-    angle_threshold: float = 30.0,
-) -> list[bool]:
+def _get_break_points(polygon: list[AxisPoint]) -> list[bool]:
+    args = get_args()
+    span_length_threshold = args.break_span_length
+    angle_threshold = args.break_angle_threshold
     size = len(polygon)
     turns = [
         signed_angle(polygon[index - 1], point, polygon[(index + 1) % size])
@@ -166,18 +168,12 @@ def _get_break_points(
     return breaks
 
 
-def _is_straight_span(
-    points: list[AxisPoint],
-    start: int,
-    end: int,
-    minimum_length: float = 8.0,
-    tolerance: float = 1.0,
-    radius: float = 100.0,
-) -> bool:
+def _is_straight_span(points: list[AxisPoint], start: int, end: int) -> bool:
+    args = get_args()
     size = len(points)
     first, last = points[start], points[end]
     length = distance(first, last)
-    if length < minimum_length:
+    if length < args.straight_min_length:
         return False
 
     stop = end if end > start else end + size
@@ -185,14 +181,17 @@ def _is_straight_span(
         offset(points[index % size], (first, last)) for index in range(start, stop + 1)
     )
     # See https://en.wikipedia.org/wiki/Sagitta_(geometry)
-    return bow <= tolerance and length * length >= 8 * bow * radius
+    return (
+        bow <= args.straight_tolerance
+        and length * length >= 8 * bow * args.straight_radius
+    )
 
 
 def _identify_straight_runs(
     contour: list[AxisPoint],
     indices: list[int],
-    dominant_length: float = 64.0,
 ) -> tuple[list[int], tuple[bool, ...]]:
+    dominant_length = get_args().dominant_length
     polygon = [contour[i] for i in indices]
     breaks = _get_break_points(polygon)
     size = len(indices)

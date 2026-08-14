@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from math import hypot
 
+from .args import get_args
 from .geometry import AxisPoint, BezierCurve
 
 
@@ -13,7 +14,8 @@ def _point(point: AxisPoint) -> str:
     return f"{_number(point[0])},{_number(point[1])}"
 
 
-def _straight(curve: BezierCurve, tolerance: float = 0.005) -> bool:
+def _straight(curve: BezierCurve) -> bool:
+    tolerance = get_args().line_tolerance
     dx = curve.end[0] - curve.start[0]
     dy = curve.end[1] - curve.start[1]
     length = hypot(dx, dy)

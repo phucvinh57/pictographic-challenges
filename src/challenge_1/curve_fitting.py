@@ -1,5 +1,6 @@
 from itertools import pairwise
 
+from .args import get_args
 from .geometry import (
     BezierCurve,
     chord_parameters,
@@ -14,10 +15,9 @@ from .geometry import (
 from .types import AxisPoint, Contour
 
 
-def _get_corner_flags(
-    contour: Contour, angle_threshold: float = 60.0
-) -> tuple[bool, ...]:
+def _get_corner_flags(contour: Contour) -> tuple[bool, ...]:
     """Say which of a closed path's vertices the path turns a corner at."""
+    angle_threshold = get_args().corner_angle_threshold
     if len(contour) < 3:
         return ()
     return tuple(
@@ -68,7 +68,6 @@ def _cut_tangents(
     corners: tuple[bool, ...],
     straight_flags: tuple[bool, ...],
     cuts: tuple[int, ...],
-    span: float,
 ) -> dict[int, tuple[AxisPoint, AxisPoint]]:
     """Give each cut the direction the path arrives and leaves along.
 
@@ -79,6 +78,7 @@ def _cut_tangents(
     the join between them smooth.
     """
     tangents = {}
+    span = get_args().tangent_span
     size = len(contour)
     for index in cuts:
         point = contour[index]
@@ -167,18 +167,16 @@ def _fit_cubics(
 def fit_closed_contour(
     contour: Contour,
     straight_flags: tuple[bool, ...],
-    tolerance: float,
-    angle_threshold: float = 60.0,
-    tangent_span: float = 3.0,
 ) -> tuple[BezierCurve, ...]:
     """Fit a closed contour with a sequence of Bezier curves."""
     size = len(contour)
     if size < 3:
         return ()
 
-    corner_flags = _get_corner_flags(contour, angle_threshold)
+    tolerance = get_args().fit_tolerance
+    corner_flags = _get_corner_flags(contour)
     cuts = _cut_indices(contour, corner_flags, straight_flags)
-    tangents = _cut_tangents(contour, corner_flags, straight_flags, cuts, tangent_span)
+    tangents = _cut_tangents(contour, corner_flags, straight_flags, cuts)
 
     curves = []
     witness_spacing = min(1.0, max(0.25, tolerance))
