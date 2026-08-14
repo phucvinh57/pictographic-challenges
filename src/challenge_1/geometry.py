@@ -8,6 +8,33 @@ from math import atan2, ceil, degrees, hypot
 AxisPoint = tuple[float, float]
 
 
+def distance(first: AxisPoint, second: AxisPoint) -> float:
+    """|AB|"""
+    return hypot(second[0] - first[0], second[1] - first[1])
+
+
+def cross_product(a: AxisPoint, b: AxisPoint, c: AxisPoint) -> float:
+    """AB x AC"""
+    return (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])
+
+
+def unit(vector: AxisPoint) -> AxisPoint:
+    length = hypot(*vector)
+    return (vector[0] / length, vector[1] / length) if length else (0.0, 0.0)
+
+
+def signed_angle(a: AxisPoint, b: AxisPoint, c: AxisPoint) -> float:
+    """Signed angle in degrees between the vectors AB and BC."""
+    ab = (b[0] - a[0], b[1] - a[1])
+    bc = (c[0] - b[0], c[1] - b[1])
+    return degrees(
+        atan2(
+            ab[0] * bc[1] - ab[1] * bc[0],
+            ab[0] * bc[0] + ab[1] * bc[1],
+        )
+    )
+
+
 @dataclass(frozen=True)
 class BezierCurve:
     """A cubic Bézier span represented by its four control points."""
@@ -18,63 +45,16 @@ class BezierCurve:
     end: AxisPoint
 
 
-def distance(first: AxisPoint, second: AxisPoint) -> float:
-    """|AB|"""
-    return hypot(second[0] - first[0], second[1] - first[1])
-
-
-def cross(first: AxisPoint, second: AxisPoint, third: AxisPoint) -> float:
-    return (second[0] - first[0]) * (third[1] - first[1]) - (third[0] - first[0]) * (
-        second[1] - first[1]
-    )
-
-
-def unit(vector: AxisPoint) -> AxisPoint:
-    length = hypot(*vector)
-    return (vector[0] / length, vector[1] / length) if length else (0.0, 0.0)
-
-
-def signed_angle(first: AxisPoint, point: AxisPoint, last: AxisPoint) -> float:
-    """Signed angle in degrees between the vectors AB and BC."""
-    incoming = (point[0] - first[0], point[1] - first[1])
-    outgoing = (last[0] - point[0], last[1] - point[1])
-    return degrees(
-        atan2(
-            incoming[0] * outgoing[1] - incoming[1] * outgoing[0],
-            incoming[0] * outgoing[0] + incoming[1] * outgoing[1],
-        )
-    )
-
-
-def offset(start: AxisPoint, end: AxisPoint, point: AxisPoint) -> float:
+def offset(point: AxisPoint, line: tuple[AxisPoint, AxisPoint]) -> float:
     """Perpendicular distance from a point to the line through A and B."""
+    start, end = line
     length = distance(start, end)
     if length == 0:
         return distance(start, point)
-    return abs(cross(start, end, point)) / length
+    return abs(cross_product(start, end, point)) / length
 
 
-def penalty(first: AxisPoint, point: AxisPoint, last: AxisPoint) -> float:
-    """Squared triangle area over its chord, via Heron's formula."""
-    side_a = distance(first, point)
-    side_b = distance(point, last)
-    chord = distance(first, last)
-    if chord == 0:
-        return 0.0
-    semiperimeter = (side_a + side_b + chord) / 2
-    area_squared = max(
-        0.0,
-        semiperimeter
-        * (semiperimeter - side_a)
-        * (semiperimeter - side_b)
-        * (semiperimeter - chord),
-    )
-    return area_squared / chord
-
-
-def walk(
-    points: Sequence[AxisPoint], index: int, step: int, span: float
-) -> AxisPoint:
+def walk(points: Sequence[AxisPoint], index: int, step: int, span: float) -> AxisPoint:
     """Follow the ring from a vertex until `span` of arc length is covered."""
     size = len(points)
     current = index

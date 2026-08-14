@@ -6,7 +6,7 @@ from skimage.measure import find_contours
 
 from .types import AxisPoint, Contour
 import numpy as np
-from math import hypot, atan2, degrees
+from .geometry import distance, cross_product, signed_angle
 
 
 def _convert_to_grayscale(image: MatLike) -> np.ndarray:
@@ -59,17 +59,12 @@ def extract_contours(image_path: Path) -> tuple[Contour, ...]:
     return tuple(contours)
 
 
-def _cross_product(a: AxisPoint, b: AxisPoint, c: AxisPoint) -> float:
-    """AB x AC"""
-    return (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])
-
-
 def _calc_penalty(point: AxisPoint, line: tuple[AxisPoint, AxisPoint]) -> float:
     """Calculate the distance from a point to a line defined by two points."""
     first, last = line
-    a = hypot(first[0] - point[0], first[1] - point[1])
-    b = hypot(point[0] - last[0], point[1] - last[1])
-    chord = hypot(last[0] - first[0], last[1] - first[1])
+    a = distance(first, point)
+    b = distance(point, last)
+    chord = distance(first, last)
     if chord == 0:
         return 0.0
     semiperimeter = (a + b + chord) / 2
@@ -122,7 +117,7 @@ def _remove_collinear(points: list[AxisPoint], indices: list[int]) -> list[int]:
             index
             for position, index in enumerate(current)
             if abs(
-                _cross_product(
+                cross_product(
                     points[current[position - 1]],
                     points[index],
                     points[current[(position + 1) % len(current)]],
@@ -136,25 +131,6 @@ def _remove_collinear(points: list[AxisPoint], indices: list[int]) -> list[int]:
     return current
 
 
-def _bend(a: AxisPoint, b: AxisPoint, c: AxisPoint) -> float:
-    """
-    Returns the signed angle in degrees between the vectors AB and BC.
-    """
-    ab = (b[0] - a[0], b[1] - a[1])
-    bc = (c[0] - b[0], c[1] - b[1])
-    return degrees(
-        atan2(
-            ab[0] * bc[1] - ab[1] * bc[0],
-            ab[0] * bc[0] + ab[1] * bc[1],
-        )
-    )
-
-
-def _distance(a: AxisPoint, b: AxisPoint) -> float:
-    """|AB|"""
-    return hypot(b[0] - a[0], b[1] - a[1])
-
-
 def _get_break_points(
     polygon: list[AxisPoint],
     span_length_threshold: float = 12.0,
@@ -162,11 +138,11 @@ def _get_break_points(
 ) -> list[bool]:
     size = len(polygon)
     turns = [
-        _bend(polygon[index - 1], point, polygon[(index + 1) % size])
+        signed_angle(polygon[index - 1], point, polygon[(index + 1) % size])
         for index, point in enumerate(polygon)
     ]
     lengths = [
-        _distance(point, polygon[(index + 1) % size])
+        distance(point, polygon[(index + 1) % size])
         for index, point in enumerate(polygon)
     ]
 
@@ -191,16 +167,17 @@ def _get_break_points(
         behind, behind_arc, behind_edge = gather(index, -1)
         ahead, ahead_arc, ahead_edge = gather(index, 1)
 
-        total_bend = abs(turns[index]) + behind + ahead
+        total_angle = abs(turns[index]) + behind + ahead
         total_length = behind_arc + ahead_arc + behind_edge + ahead_edge
 
         breaks.append(
-            total_bend >= angle_threshold
-            # total_bend / total_length >= angle_threshold / span_length_threshold
+            total_angle >= angle_threshold
             # To detect if bend is sufficiently concentrated
-            and total_bend / total_length >= angle_threshold / span_length_threshold
+            and total_angle / total_length
+            >= angle_threshold / span_length_threshold
         )
     return breaks
+
 
 def _is_straight_span(
     points: list[AxisPoint],
@@ -212,14 +189,12 @@ def _is_straight_span(
 ) -> bool:
     size = len(points)
     first, last = points[start], points[end]
-    length = _distance(first, last)
+    length = distance(first, last)
     if length < minimum_length:
         return False
 
     stop = end if end > start else end + size
-    bow = max(
-        _distance(first, points[index % size]) for index in range(start, stop + 1)
-    )
+    bow = max(distance(first, points[index % size]) for index in range(start, stop + 1))
     # See https://en.wikipedia.org/wiki/Sagitta_(geometry)
     return bow <= tolerance and length * length >= 8 * bow * radius
 
@@ -235,7 +210,7 @@ def _identify_straight_runs(
 
     for i, point in enumerate(polygon):
         next = (i + 1) % size
-        if _distance(point, polygon[next]) >= dominant_length:
+        if distance(point, polygon[next]) >= dominant_length:
             breaks[i] = breaks[next] = True
     marks = [i for i in range(size) if breaks[i]]
 
@@ -272,7 +247,7 @@ def _identify_straight_runs(
 
 
 def process_contour(contour: Contour) -> tuple[Contour, tuple[bool, ...]]:
-    
+
     path = list(contour)
     # A being a closed contour, we need at least 3 points to form a polygon.
     if len(path) < 3:
@@ -289,4 +264,6 @@ def process_contour(contour: Contour) -> tuple[Contour, tuple[bool, ...]]:
     corners = [contour[i] for i in kept_indices]
 
     return (*corners, corners[0]), straight_flags
+
+
 __all__ = ["extract_contours", "process_contour"]
