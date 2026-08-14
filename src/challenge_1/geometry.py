@@ -6,7 +6,7 @@ from itertools import pairwise
 from math import atan2, ceil, degrees, hypot
 
 AxisPoint = tuple[float, float]
-
+Contour = tuple[AxisPoint, ...]
 
 def distance(first: AxisPoint, second: AxisPoint) -> float:
     """|AB|"""

@@ -7,8 +7,7 @@ from cv2.typing import MatLike
 from skimage.measure import find_contours
 
 from .args import get_args
-from .geometry import cross_product, distance, offset, signed_angle
-from .types import AxisPoint, Contour
+from .geometry import cross_product, distance, offset, signed_angle, AxisPoint, Contour
 
 
 def _convert_to_grayscale(image: MatLike) -> np.ndarray:

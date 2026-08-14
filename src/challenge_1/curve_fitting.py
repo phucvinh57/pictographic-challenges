@@ -11,8 +11,9 @@ from .geometry import (
     line_curve,
     signed_angle,
     unit,
+    AxisPoint,
+    Contour,
 )
-from .types import AxisPoint, Contour
 
 
 def _get_corner_flags(contour: Contour) -> tuple[bool, ...]:
@@ -155,9 +156,7 @@ def _fit_cubics(
                 contour[split - 1][1] - contour[split][1],
             )
         )
-    left = _fit_cubics(
-        contour[: split + 1], start_tangent, center, tolerance_squared
-    )
+    left = _fit_cubics(contour[: split + 1], start_tangent, center, tolerance_squared)
     right = _fit_cubics(
         contour[split:], (-center[0], -center[1]), end_tangent, tolerance_squared
     )
