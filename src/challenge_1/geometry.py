@@ -8,6 +8,33 @@ from math import atan2, ceil, degrees, hypot
 AxisPoint = tuple[float, float]
 
 
+def distance(first: AxisPoint, second: AxisPoint) -> float:
+    """|AB|"""
+    return hypot(second[0] - first[0], second[1] - first[1])
+
+
+def cross_product(a: AxisPoint, b: AxisPoint, c: AxisPoint) -> float:
+    """AB x AC"""
+    return (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])
+
+
+def unit(vector: AxisPoint) -> AxisPoint:
+    length = hypot(*vector)
+    return (vector[0] / length, vector[1] / length) if length else (0.0, 0.0)
+
+
+def signed_angle(a: AxisPoint, b: AxisPoint, c: AxisPoint) -> float:
+    """Signed angle in degrees between the vectors AB and BC."""
+    ab = (b[0] - a[0], b[1] - a[1])
+    bc = (c[0] - b[0], c[1] - b[1])
+    return degrees(
+        atan2(
+            ab[0] * bc[1] - ab[1] * bc[0],
+            ab[0] * bc[0] + ab[1] * bc[1],
+        )
+    )
+
+
 @dataclass(frozen=True)
 class BezierCurve:
     """A cubic Bézier span represented by its four control points."""
@@ -18,74 +45,13 @@ class BezierCurve:
     end: AxisPoint
 
 
-def distance(first: AxisPoint, second: AxisPoint) -> float:
-    """|AB|"""
-    return hypot(second[0] - first[0], second[1] - first[1])
-
-
-def cross(first: AxisPoint, second: AxisPoint, third: AxisPoint) -> float:
-    return (second[0] - first[0]) * (third[1] - first[1]) - (third[0] - first[0]) * (
-        second[1] - first[1]
-    )
-
-
-def unit(vector: AxisPoint) -> AxisPoint:
-    length = hypot(*vector)
-    return (vector[0] / length, vector[1] / length) if length else (0.0, 0.0)
-
-
-def signed_angle(first: AxisPoint, point: AxisPoint, last: AxisPoint) -> float:
-    """Signed angle in degrees between the vectors AB and BC."""
-    incoming = (point[0] - first[0], point[1] - first[1])
-    outgoing = (last[0] - point[0], last[1] - point[1])
-    return degrees(
-        atan2(
-            incoming[0] * outgoing[1] - incoming[1] * outgoing[0],
-            incoming[0] * outgoing[0] + incoming[1] * outgoing[1],
-        )
-    )
-
-
-def offset(start: AxisPoint, end: AxisPoint, point: AxisPoint) -> float:
+def offset(point: AxisPoint, line: tuple[AxisPoint, AxisPoint]) -> float:
     """Perpendicular distance from a point to the line through A and B."""
+    start, end = line
     length = distance(start, end)
     if length == 0:
         return distance(start, point)
-    return abs(cross(start, end, point)) / length
-
-
-def penalty(first: AxisPoint, point: AxisPoint, last: AxisPoint) -> float:
-    """Squared triangle area over its chord, via Heron's formula."""
-    side_a = distance(first, point)
-    side_b = distance(point, last)
-    chord = distance(first, last)
-    if chord == 0:
-        return 0.0
-    semiperimeter = (side_a + side_b + chord) / 2
-    area_squared = max(
-        0.0,
-        semiperimeter
-        * (semiperimeter - side_a)
-        * (semiperimeter - side_b)
-        * (semiperimeter - chord),
-    )
-    return area_squared / chord
-
-
-def walk(
-    points: Sequence[AxisPoint], index: int, step: int, span: float
-) -> AxisPoint:
-    """Follow the ring from a vertex until `span` of arc length is covered."""
-    size = len(points)
-    current = index
-    travelled = 0.0
-    for _ in range(size - 1):
-        following = (current + step) % size
-        travelled += distance(points[current], points[following])
-        current = following
-        if travelled >= span:
-            break
-    return points[current]
+    return abs(cross_product(start, end, point)) / length
 
 
 def densify(points: Sequence[AxisPoint], spacing: float) -> tuple[AxisPoint, ...]:
@@ -102,26 +68,6 @@ def densify(points: Sequence[AxisPoint], spacing: float) -> tuple[AxisPoint, ...
             for index in range(1, divisions + 1)
         )
     return tuple(dense)
-
-
-def evaluate(curve: BezierCurve, parameter: float) -> AxisPoint:
-    remaining = 1 - parameter
-    weights = (
-        remaining**3,
-        3 * remaining * remaining * parameter,
-        3 * remaining * parameter * parameter,
-        parameter**3,
-    )
-    controls = (
-        curve.start,
-        curve.first_control,
-        curve.second_control,
-        curve.end,
-    )
-    return (
-        sum(weight * point[0] for weight, point in zip(weights, controls)),
-        sum(weight * point[1] for weight, point in zip(weights, controls)),
-    )
 
 
 def chord_parameters(points: Sequence[AxisPoint]) -> list[float]:
@@ -191,13 +137,35 @@ def fit_error(
     curve: BezierCurve,
 ) -> tuple[float, int]:
     """Worst squared deviation from the curve, and where it happens."""
+    (start_x, start_y) = curve.start
+    (first_x, first_y) = curve.first_control
+    (second_x, second_y) = curve.second_control
+    (end_x, end_y) = curve.end
     maximum = 0.0
     split = len(points) // 2
     for index in range(1, len(points) - 1):
-        fitted = evaluate(curve, parameters[index])
-        error = (fitted[0] - points[index][0]) ** 2 + (
-            fitted[1] - points[index][1]
-        ) ** 2
+        # The cubic evaluated at this point's parameter, inlined so the control
+        # points are unpacked once rather than on every sample.
+        parameter = parameters[index]
+        remaining = 1 - parameter
+        start_weight = remaining**3
+        first_weight = 3 * remaining * remaining * parameter
+        second_weight = 3 * remaining * parameter * parameter
+        end_weight = parameter**3
+        point_x, point_y = points[index]
+        gap_x = (
+            start_weight * start_x
+            + first_weight * first_x
+            + second_weight * second_x
+            + end_weight * end_x
+        ) - point_x
+        gap_y = (
+            start_weight * start_y
+            + first_weight * first_y
+            + second_weight * second_y
+            + end_weight * end_y
+        ) - point_y
+        error = gap_x * gap_x + gap_y * gap_y
         if error >= maximum:
             maximum = error
             split = index

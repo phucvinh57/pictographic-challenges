@@ -1,0 +1,22 @@
+from pathlib import Path
+
+IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff"}
+IN_DIR = Path("input/challenge_1")
+OUT_DIR = Path("output/challenge_1")
+
+SIMPLIFY_TOLERANCE = 0.25
+COLLINEAR_EPSILON = 1e-9
+
+BREAK_SPAN_LENGTH = 12.0
+BREAK_ANGLE_THRESHOLD = 30.0
+
+STRAIGHT_MIN_LENGTH = 8.0
+STRAIGHT_TOLERANCE = 1.0
+STRAIGHT_RADIUS = 100.0
+DOMINANT_LENGTH = 64.0
+
+CORNER_ANGLE_THRESHOLD = 60.0
+FIT_TOLERANCE = 0.75
+TANGENT_SPAN = 3.0
+
+LINE_TOLERANCE = 0.005

@@ -1,10 +1,7 @@
-from __future__ import annotations
-
-from collections.abc import Sequence
 from itertools import pairwise
 
+from .args import get_args
 from .geometry import (
-    AxisPoint,
     BezierCurve,
     chord_parameters,
     densify,
@@ -14,54 +11,63 @@ from .geometry import (
     line_curve,
     signed_angle,
     unit,
-    walk,
 )
+from .types import AxisPoint, Contour
 
 
-def corner_flags(
-    points: Sequence[AxisPoint], threshold: float
-) -> tuple[bool, ...]:
+def _get_corner_flags(contour: Contour) -> tuple[bool, ...]:
     """Say which of a closed path's vertices the path turns a corner at."""
-    if len(points) < 3:
+    angle_threshold = get_args().corner_angle_threshold
+    if len(contour) < 3:
         return ()
     return tuple(
-        abs(signed_angle(points[index - 1], point, points[(index + 1) % len(points)]))
-        >= threshold
-        for index, point in enumerate(points)
+        abs(signed_angle(contour[i - 1], point, contour[(i + 1) % len(contour)]))
+        >= angle_threshold
+        for i, point in enumerate(contour)
     )
 
 
 def _cut_indices(
-    points: Sequence[AxisPoint],
-    corners: Sequence[bool],
-    straight: Sequence[bool],
-) -> list[int]:
-    """Pick where the loop is broken into sections.
+    contour: Contour,
+    corners: tuple[bool, ...],
+    straight_flags: tuple[bool, ...],
+) -> tuple[int, ...]:
+    size = len(contour)
+    cuts = {i for i, corner in enumerate(corners) if corner}
+    for i, straight in enumerate(straight_flags):
+        if straight:
+            cuts.update((i, (i + 1) % size))
 
-    Its corners, and both ends of every straight run: a straight is a section of
-    its own, so it stays the line it was measured to be, and the curve either
-    side of it starts where the line stops rather than eating into it.
-    """
-    size = len(points)
-    cuts = {index for index, corner in enumerate(corners) if corner}
-    for index, run in enumerate(straight):
-        if run:
-            cuts.update((index, (index + 1) % size))
     ordered = sorted(cuts)
     if not ordered:
-        return [0, size // 2]
+        return (0, size // 2)
+
     if len(ordered) == 1:
+        # If there's only one cut, add a second cut opposite it, which cuts the contour in half.
         ordered.append((ordered[0] + size // 2) % size)
         ordered.sort()
-    return ordered
+    return tuple(ordered)
+
+
+def walk(contour: Contour, index: int, step: int, span: float) -> AxisPoint:
+    """Follow the ring from a vertex until `span` of arc length is covered."""
+    size = len(contour)
+    current = index
+    travelled = 0.0
+    for _ in range(size - 1):
+        following = (current + step) % size
+        travelled += distance(contour[current], contour[following])
+        current = following
+        if travelled >= span:
+            break
+    return contour[current]
 
 
 def _cut_tangents(
-    points: Sequence[AxisPoint],
-    corners: Sequence[bool],
-    straight: Sequence[bool],
-    cuts: Sequence[int],
-    span: float,
+    contour: Contour,
+    corners: tuple[bool, ...],
+    straight_flags: tuple[bool, ...],
+    cuts: tuple[int, ...],
 ) -> dict[int, tuple[AxisPoint, AxisPoint]]:
     """Give each cut the direction the path arrives and leaves along.
 
@@ -72,122 +78,116 @@ def _cut_tangents(
     the join between them smooth.
     """
     tangents = {}
-    size = len(points)
+    span = get_args().tangent_span
+    size = len(contour)
     for index in cuts:
-        point = points[index]
+        point = contour[index]
         arriving = (
             unit(
                 (
-                    point[0] - points[index - 1][0],
-                    point[1] - points[index - 1][1],
+                    point[0] - contour[index - 1][0],
+                    point[1] - contour[index - 1][1],
                 )
             )
-            if straight[index - 1]
+            if straight_flags[index - 1]
             else None
         )
         leaving = (
             unit(
                 (
-                    points[(index + 1) % size][0] - point[0],
-                    points[(index + 1) % size][1] - point[1],
+                    contour[(index + 1) % size][0] - point[0],
+                    contour[(index + 1) % size][1] - point[1],
                 )
             )
-            if straight[index]
+            if straight_flags[index]
             else None
         )
-        before = walk(points, index, -1, span)
-        after = walk(points, index, 1, span)
+        before = walk(contour, index, -1, span)
+        after = walk(contour, index, 1, span)
         if corners[index]:
-            incoming = arriving or unit(
-                (point[0] - before[0], point[1] - before[1])
-            )
-            outgoing = leaving or unit(
-                (after[0] - point[0], after[1] - point[1])
-            )
+            incoming = arriving or unit((point[0] - before[0], point[1] - before[1]))
+            outgoing = leaving or unit((after[0] - point[0], after[1] - point[1]))
         elif arriving or leaving:
             incoming = outgoing = arriving or leaving
         else:
-            incoming = outgoing = unit(
-                (after[0] - before[0], after[1] - before[1])
-            )
+            incoming = outgoing = unit((after[0] - before[0], after[1] - before[1]))
         tangents[index] = (incoming, outgoing)
     return tangents
 
 
 def _fit_cubics(
-    points: Sequence[AxisPoint],
+    contour: Contour,
     start_tangent: AxisPoint,
     end_tangent: AxisPoint,
     tolerance_squared: float,
 ) -> list[BezierCurve]:
-    if len(points) == 2:
-        span = distance(points[0], points[1]) / 3
+    if len(contour) == 2:
+        span = distance(contour[0], contour[1]) / 3
         return [
             BezierCurve(
-                points[0],
+                contour[0],
                 (
-                    points[0][0] + start_tangent[0] * span,
-                    points[0][1] + start_tangent[1] * span,
+                    contour[0][0] + start_tangent[0] * span,
+                    contour[0][1] + start_tangent[1] * span,
                 ),
                 (
-                    points[1][0] + end_tangent[0] * span,
-                    points[1][1] + end_tangent[1] * span,
+                    contour[1][0] + end_tangent[0] * span,
+                    contour[1][1] + end_tangent[1] * span,
                 ),
-                points[1],
+                contour[1],
             )
         ]
-    parameters = chord_parameters(points)
-    curve = generate_bezier(points, parameters, start_tangent, end_tangent)
-    error, split = fit_error(points, parameters, curve)
+    parameters = chord_parameters(contour)
+    curve = generate_bezier(contour, parameters, start_tangent, end_tangent)
+    error, split = fit_error(contour, parameters, curve)
     if error <= tolerance_squared:
         return [curve]
     center = unit(
         (
-            points[split - 1][0] - points[split + 1][0],
-            points[split - 1][1] - points[split + 1][1],
+            contour[split - 1][0] - contour[split + 1][0],
+            contour[split - 1][1] - contour[split + 1][1],
         )
     )
     if center == (0.0, 0.0):
         center = unit(
             (
-                points[split - 1][0] - points[split][0],
-                points[split - 1][1] - points[split][1],
+                contour[split - 1][0] - contour[split][0],
+                contour[split - 1][1] - contour[split][1],
             )
         )
     left = _fit_cubics(
-        points[: split + 1], start_tangent, center, tolerance_squared
+        contour[: split + 1], start_tangent, center, tolerance_squared
     )
     right = _fit_cubics(
-        points[split:], (-center[0], -center[1]), end_tangent, tolerance_squared
+        contour[split:], (-center[0], -center[1]), end_tangent, tolerance_squared
     )
     return [*left, *right]
 
 
 def fit_closed_contour(
-    points: Sequence[AxisPoint],
-    corners: Sequence[bool],
-    straight: Sequence[bool],
-    tolerance: float,
-    tangent_span: float = 3.0,
+    contour: Contour,
+    straight_flags: tuple[bool, ...],
 ) -> tuple[BezierCurve, ...]:
-    """Fit an adaptive cubic chain around a smoothed closed contour."""
-    path = points
-    corner_flags = list(corners)
-    runs = list(straight)
-    if len(path) < 3 or len(corner_flags) != len(path) or len(runs) != len(path):
+    """Fit a closed contour with a sequence of Bezier curves."""
+    size = len(contour)
+    if size < 3:
         return ()
-    cuts = _cut_indices(path, corner_flags, runs)
-    tangents = _cut_tangents(path, corner_flags, runs, cuts, tangent_span)
+
+    tolerance = get_args().fit_tolerance
+    corner_flags = _get_corner_flags(contour)
+    cuts = _cut_indices(contour, corner_flags, straight_flags)
+    tangents = _cut_tangents(contour, corner_flags, straight_flags, cuts)
+
     curves = []
     witness_spacing = min(1.0, max(0.25, tolerance))
     for start, end in pairwise([*cuts, cuts[0]]):
-        if runs[start] and end == (start + 1) % len(path):
-            curves.append(line_curve(path[start], path[end]))
+        if straight_flags[start] and end == (start + 1) % size:
+            curves.append(line_curve(contour[start], contour[end]))
             continue
         section = (
-            path[start : end + 1]
+            contour[start : end + 1]
             if start < end
-            else [*path[start:], *path[: end + 1]]
+            else [*contour[start:], *contour[: end + 1]]
         )
         dense = densify(section, witness_spacing)
         start_tangent = tangents[start][1]
@@ -213,3 +213,6 @@ def fit_closed_contour(
             curves[0].start,
         )
     return tuple(curves)
+
+
+__all__ = ["fit_closed_contour"]
