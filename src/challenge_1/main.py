@@ -11,18 +11,24 @@ from .svg import draw_bezier_svg
 def convert_to_svg(image_path: Path) -> None:
     args = get_args()
     debug.begin(image_path.name)
-    image = read_image_in_gray_scale(image_path)
-    contours = extract_contours(image)
+    with debug.timed("read image"):
+        image = read_image_in_gray_scale(image_path)
+    with debug.timed("extract contours"):
+        contours = extract_contours(image)
     debug.count("contours", len(contours))
 
     curves_list = []
     for c in contours:
-        simplified_contour, straight_flags = process_contour(c)
-        curves_list.append(fit_closed_contour(simplified_contour, straight_flags))
+        with debug.timed("process contours"):
+            simplified_contour, straight_flags = process_contour(c)
+        with debug.timed("fit curves"):
+            curves_list.append(fit_closed_contour(simplified_contour, straight_flags))
     shape = (int(image.shape[0]), int(image.shape[1]))
-    svg = draw_bezier_svg(shape, curves_list)
+    with debug.timed("draw svg"):
+        svg = draw_bezier_svg(shape, curves_list)
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    (args.output_dir / f"{image_path.stem}.svg").write_text(svg)
+    with debug.timed("write svg"):
+        (args.output_dir / f"{image_path.stem}.svg").write_text(svg)
     debug.count("svg bytes", len(svg))
     debug.report()
 
