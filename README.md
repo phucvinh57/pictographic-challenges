@@ -31,6 +31,12 @@ uv sync
 ```
 ## How to run
 
+Active `venv` first:
+
+```bash
+source .venv/bin/activate
+```
+
 ## Challenge 1
 
 ```bash
