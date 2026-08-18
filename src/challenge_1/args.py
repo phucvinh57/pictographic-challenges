@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-from argparse import ArgumentParser, ArgumentTypeError
+from argparse import ArgumentParser
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, overload
+
+from common.validation import angle, non_negative_float, ratio
 
 from .constants import (
     BREAK_ANGLE_THRESHOLD,
@@ -20,34 +22,6 @@ from .constants import (
     STRAIGHT_TOLERANCE_RATIO,
     TANGENT_SPAN_RATIO,
 )
-
-
-def _positive(value: str) -> float:
-    number = float(value)
-    if number <= 0:
-        raise ArgumentTypeError(f"must be greater than 0, got {value}")
-    return number
-
-
-def _non_negative(value: str) -> float:
-    number = float(value)
-    if number < 0:
-        raise ArgumentTypeError(f"must be 0 or greater, got {value}")
-    return number
-
-
-def _ratio(value: str) -> float:
-    number = float(value)
-    if not 0 < number <= 1:
-        raise ArgumentTypeError(f"must be a fraction in (0, 1], got {value}")
-    return number
-
-
-def _angle(value: str) -> float:
-    number = float(value)
-    if not 0 <= number <= 180:
-        raise ArgumentTypeError(f"must be between 0 and 180 degrees, got {value}")
-    return number
 
 
 @dataclass(frozen=True)
@@ -84,7 +58,7 @@ class Args:
         simplify = parser.add_argument_group("contour simplification")
         simplify.add_argument(
             "--simplify-ratio",
-            type=_ratio,
+            type=ratio,
             default=SIMPLIFY_RATIO,
             help="How far a dropped point may stray from the chord replacing it, "
             "as a fraction of perimeter",
@@ -93,13 +67,13 @@ class Args:
         breaks = parser.add_argument_group("corner detection")
         breaks.add_argument(
             "--break-span-ratio",
-            type=_ratio,
+            type=ratio,
             default=BREAK_SPAN_RATIO,
             help="Arc looked at on each side of a vertex, as a fraction of perimeter",
         )
         breaks.add_argument(
             "--break-angle-threshold",
-            type=_angle,
+            type=angle,
             default=BREAK_ANGLE_THRESHOLD,
             help="Total turning over that span that marks a break point",
         )
@@ -107,25 +81,25 @@ class Args:
         straight = parser.add_argument_group("straight runs")
         straight.add_argument(
             "--straight-min-ratio",
-            type=_ratio,
+            type=ratio,
             default=STRAIGHT_MIN_RATIO,
             help="Shortest straight span, as a fraction of perimeter",
         )
         straight.add_argument(
             "--straight-tolerance-ratio",
-            type=_ratio,
+            type=ratio,
             default=STRAIGHT_TOLERANCE_RATIO,
             help="Largest bow inside a straight span, as a fraction of perimeter",
         )
         straight.add_argument(
             "--straight-bow-ratio",
-            type=_ratio,
+            type=ratio,
             default=STRAIGHT_BOW_RATIO,
             help="Largest bow allowed inside a straight span, relative to its length",
         )
         straight.add_argument(
             "--dominant-ratio",
-            type=_ratio,
+            type=ratio,
             default=DOMINANT_RATIO,
             help="Edge that forces a break at both ends, as a fraction of perimeter",
         )
@@ -134,21 +108,21 @@ class Args:
         fitting.add_argument(
             "-a",
             "--corner-angle-threshold",
-            type=_angle,
+            type=angle,
             default=CORNER_ANGLE_THRESHOLD,
             help="Turn at a vertex that makes it a corner",
         )
         fitting.add_argument(
             "-t",
             "--fit-ratio",
-            type=_ratio,
+            type=ratio,
             default=FIT_RATIO,
             help="Largest deviation between a curve and the contour, "
             "as a fraction of perimeter",
         )
         fitting.add_argument(
             "--tangent-span-ratio",
-            type=_ratio,
+            type=ratio,
             default=TANGENT_SPAN_RATIO,
             help="Arc used to estimate a tangent at a cut, as a fraction of perimeter",
         )
@@ -156,7 +130,7 @@ class Args:
         output = parser.add_argument_group("svg output")
         output.add_argument(
             "--line-tolerance",
-            type=_non_negative,
+            type=non_negative_float,
             default=LINE_TOLERANCE,
             help="Flatness under which a cubic is written as a line",
         )

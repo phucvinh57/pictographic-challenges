@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from math import hypot
 
-from . import debug
+from common import debug
+
 from .args import get_args
 from .geometry import AxisPoint, BezierCurve
 

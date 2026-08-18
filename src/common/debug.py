@@ -1,24 +1,22 @@
-from __future__ import annotations
-
 from collections.abc import Generator
 from contextlib import contextmanager
 from time import perf_counter
 
-from .args import get_args
-
+_enabled = False
 _title = ""
 _steps: dict[str, int] = {}
 _times: dict[str, float] = {}
 _started = 0.0
 
 
-def enabled() -> bool:
-    return get_args("debug")
+def configure(enabled: bool) -> None:
+    global _enabled
+    _enabled = enabled
 
 
 def begin(title: str) -> None:
     global _title, _started
-    if not enabled():
+    if not _enabled:
         return
     _title = title
     _steps.clear()
@@ -27,14 +25,14 @@ def begin(title: str) -> None:
 
 
 def count(step: str, amount: int = 1) -> None:
-    if not enabled():
+    if not _enabled:
         return
     _steps[step] = _steps.get(step, 0) + amount
 
 
 @contextmanager
 def timed(step: str) -> Generator[None]:
-    if not enabled():
+    if not _enabled:
         yield
         return
     start = perf_counter()
@@ -45,7 +43,7 @@ def timed(step: str) -> Generator[None]:
 
 
 def report() -> None:
-    if not enabled():
+    if not _enabled:
         return
     elapsed = perf_counter() - _started
     rows = [(step, f"{amount:,}") for step, amount in _steps.items()]
@@ -60,4 +58,4 @@ def report() -> None:
     _times.clear()
 
 
-__all__ = ["begin", "count", "enabled", "report", "timed"]
+__all__ = ["begin", "configure", "count", "report", "timed"]

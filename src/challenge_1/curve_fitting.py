@@ -1,6 +1,7 @@
 from itertools import pairwise
 
-from . import debug
+from common import debug
+
 from .args import get_args
 from .constants import FIT_FLOOR, TANGENT_SPAN_FLOOR
 from .geometry import (

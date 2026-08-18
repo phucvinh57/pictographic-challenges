@@ -44,3 +44,12 @@ uv run challenge_1
 ```
 
 Output will be under `./output/challenge_1`.
+
+## Challenge 2
+
+```bash
+uv run challenge_2
+```
+
+This extracts glyph borders with Canny, then thins the enclosed ink to a
+one-pixel skeleton. Output PNGs are written to `./output/challenge_2`.

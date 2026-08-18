@@ -5,7 +5,8 @@ import cv2
 import numpy as np
 from skimage.measure import find_contours
 
-from . import debug
+from common import debug
+
 from .args import get_args
 from .constants import (
     BREAK_SPAN_FLOOR,
