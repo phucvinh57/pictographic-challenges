@@ -5,7 +5,7 @@ For each image, the pipeline:
 1. blurs the grayscale image and extracts its borders with Canny;
 2. traces those borders with `findContours` and uses them to retain only ink
    components that belong to a substantial glyph boundary;
-3. thins the resulting binary glyph with Zhang-Suen thinning.
+3. extracts the resulting binary glyph's medial axis.
 
 The output is a white PNG with a one-pixel black skeleton, preserving junctions
 and loops in the original glyph.
@@ -18,3 +18,6 @@ uv run challenge_2
 
 Use `uv run challenge_2 --help` to change the input/output directories, Canny
 thresholds, or minimum retained component area.
+
+Pass `--debug` to also write a `<name>_debug.png` for each input: Canny edges and
+the medial axis in grey.

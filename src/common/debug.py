@@ -4,7 +4,7 @@ from time import perf_counter
 
 _enabled = False
 _title = ""
-_steps: dict[str, int] = {}
+_steps: dict[str, float] = {}
 _times: dict[str, float] = {}
 _started = 0.0
 
@@ -24,7 +24,7 @@ def begin(title: str) -> None:
     _started = perf_counter()
 
 
-def count(step: str, amount: int = 1) -> None:
+def count(step: str, amount: float = 1) -> None:
     if not _enabled:
         return
     _steps[step] = _steps.get(step, 0) + amount

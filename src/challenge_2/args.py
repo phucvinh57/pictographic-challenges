@@ -7,7 +7,13 @@ from typing import Literal, overload
 
 from common.validation import non_negative_int, positive_int
 
-from .constants import CANNY_HIGH, CANNY_LOW, IN_DIR, MIN_AREA, OUT_DIR
+from .constants import (
+    CANNY_HIGH,
+    CANNY_LOW,
+    IN_DIR,
+    MIN_AREA,
+    OUT_DIR,
+)
 
 
 @dataclass(frozen=True)

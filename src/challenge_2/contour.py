@@ -24,7 +24,7 @@ def read_image_in_gray_scale(image_path: Path) -> np.ndarray:
     return cv2.cvtColor(composited.astype(np.uint8), cv2.COLOR_BGR2GRAY)
 
 
-def extract_ink_mask(image: np.ndarray) -> np.ndarray:
+def extract_ink_mask(image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     blurred = cv2.GaussianBlur(image, (3, 3), 0)
     edges = cv2.Canny(blurred, get_args("canny_low"), get_args("canny_high"))
     contours, _ = cv2.findContours(edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
@@ -53,7 +53,7 @@ def extract_ink_mask(image: np.ndarray) -> np.ndarray:
         ):
             mask[component] = 255
     debug.count("ink pixels", int(np.count_nonzero(mask)))
-    return mask
+    return mask, edges
 
 
 __all__ = ["extract_ink_mask", "read_image_in_gray_scale"]
