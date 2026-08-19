@@ -5,6 +5,7 @@ import numpy as np
 
 from common import debug
 
+from .graph import build_graph
 from .args import get_args
 from .constants import IMAGE_SUFFIXES
 from .contour import extract_ink_mask, read_image_in_gray_scale
@@ -12,6 +13,8 @@ from .skeleton import MedialAxis, skeletonize
 
 _EDGE_GREY = (225, 225, 225)
 _AXIS_GREY = (170, 170, 170)
+
+
 def write_debug_image(medial: MedialAxis, edges: np.ndarray, output_path: Path) -> None:
     overlay = np.full((*medial.shape, 3), 255, dtype=np.uint8)
     overlay[edges > 0] = _EDGE_GREY
@@ -30,6 +33,9 @@ def convert_to_skeleton(image_path: Path) -> None:
         mask, edges = extract_ink_mask(image)
     with debug.timed("thin skeleton"):
         medial_axis = skeletonize(mask)
+    with debug.timed("build graph"):
+        graph = build_graph(medial_axis)
+
     raster = np.where(medial_axis.axis, 0, 255).astype(np.uint8)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
