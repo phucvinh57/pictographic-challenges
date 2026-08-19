@@ -51,5 +51,6 @@ Output will be under `./output/challenge_1`.
 uv run challenge_2
 ```
 
-This extracts glyph borders with Canny, then thins the enclosed ink to a
-one-pixel skeleton. Output PNGs are written to `./output/challenge_2`.
+This extracts glyph borders with Canny, thins the enclosed ink to a skeleton,
+then samples and smooths its graph edges with cubic Bézier curves. Output SVGs
+are written to `./output/challenge_2`.

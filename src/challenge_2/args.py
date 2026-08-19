@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, overload
 
-from common.validation import non_negative_int, positive_int
+from common.validation import non_negative_int, positive_float, positive_int, ratio
 
 from .constants import (
     CANNY_HIGH,
@@ -13,6 +13,10 @@ from .constants import (
     IN_DIR,
     MIN_AREA,
     OUT_DIR,
+    SAMPLE_SPACING,
+    STROKE_WIDTH,
+    TRANSITION_DELTA,
+    TRANSITION_FLATNESS,
 )
 
 
@@ -23,6 +27,10 @@ class Args:
     canny_low: int
     canny_high: int
     min_area: int
+    transition_delta: float
+    transition_flatness: float
+    sample_spacing: int
+    stroke_width: float
     debug: bool
 
     @classmethod
@@ -38,6 +46,34 @@ class Args:
         borders.add_argument("--canny-high", type=positive_int, default=CANNY_HIGH)
         borders.add_argument("--min-area", type=positive_int, default=MIN_AREA)
 
+        transitions = parser.add_argument_group("radius transition detection")
+        transitions.add_argument(
+            "--transition-delta",
+            type=ratio,
+            default=TRANSITION_DELTA,
+            help="Minimum junction-to-stroke radius drop ratio",
+        )
+        transitions.add_argument(
+            "--transition-flatness",
+            type=ratio,
+            default=TRANSITION_FLATNESS,
+            help="Maximum plateau slope relative to the incoming slope",
+        )
+
+        smoothing = parser.add_argument_group("Bézier smoothing")
+        smoothing.add_argument(
+            "--sample-spacing",
+            type=positive_int,
+            default=SAMPLE_SPACING,
+            help="Arc distance in pixels between points sampled before smoothing",
+        )
+        smoothing.add_argument(
+            "--stroke-width",
+            type=positive_float,
+            default=STROKE_WIDTH,
+            help="Fixed SVG edge width in pixels",
+        )
+
         parser.add_argument(
             "-d", "--debug", action="store_true", help="Enable debug mode"
         )
@@ -48,7 +84,8 @@ class Args:
 
 
 PathField = Literal["input_dir", "output_dir"]
-IntField = Literal["canny_low", "canny_high", "min_area"]
+IntField = Literal["canny_low", "canny_high", "min_area", "sample_spacing"]
+FloatField = Literal["transition_delta", "transition_flatness", "stroke_width"]
 BoolField = Literal["debug"]
 
 _args: Args | None = None
@@ -61,10 +98,12 @@ def get_args(field: PathField) -> Path: ...
 @overload
 def get_args(field: IntField) -> int: ...
 @overload
+def get_args(field: FloatField) -> float: ...
+@overload
 def get_args(field: BoolField) -> bool: ...
 def get_args(
-    field: PathField | IntField | BoolField | None = None,
-) -> Args | Path | int | bool:
+    field: PathField | IntField | FloatField | BoolField | None = None,
+) -> Args | Path | int | float | bool:
     global _args
     if _args is None:
         _args = Args.parse()

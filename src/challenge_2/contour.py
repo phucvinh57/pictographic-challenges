@@ -40,16 +40,13 @@ def extract_ink_mask(image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     cv2.drawContours(borders, significant_contours, -1, 255, thickness=1)
     border_neighbourhood = cv2.dilate(borders, np.ones((3, 3), np.uint8))
 
-    _, threshold = cv2.threshold(
-        image, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
-    )
+    _, threshold = cv2.threshold(image, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
     labels_count, labels, stats, _ = cv2.connectedComponentsWithStats(threshold)
     mask = np.zeros_like(threshold)
     for label in range(1, labels_count):
         component = labels == label
-        if (
-            stats[label, cv2.CC_STAT_AREA] >= get_args("min_area")
-            and np.any(border_neighbourhood[component])
+        if stats[label, cv2.CC_STAT_AREA] >= get_args("min_area") and np.any(
+            border_neighbourhood[component]
         ):
             mask[component] = 255
     debug.count("ink pixels", int(np.count_nonzero(mask)))

@@ -8,6 +8,13 @@ def non_negative_float(value: str) -> float:
     return number
 
 
+def positive_float(value: str) -> float:
+    number = float(value)
+    if number <= 0:
+        raise ArgumentTypeError(f"must be greater than 0, got {value}")
+    return number
+
+
 def positive_int(value: str) -> int:
     number = int(value)
     if number <= 0:
@@ -40,6 +47,7 @@ __all__ = [
     "angle",
     "non_negative_float",
     "non_negative_int",
+    "positive_float",
     "positive_int",
     "ratio",
 ]

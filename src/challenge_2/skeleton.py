@@ -34,7 +34,7 @@ def rasterize(polylines: Sequence[np.ndarray], shape: tuple[int, int]) -> np.nda
             if 0 <= y < shape[0] and 0 <= x < shape[1]:
                 canvas[y, x] = 0
             continue
-        cv2.polylines(canvas, [pixels], False, 0, 1, cv2.LINE_8)
+        cv2.polylines(canvas, [pixels], False, 0, 1, cv2.LINE_AA)
     return canvas
 
 
