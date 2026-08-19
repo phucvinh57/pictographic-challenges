@@ -4,8 +4,10 @@ import cv2
 import numpy as np
 
 from common import debug
+from common.vectorization import Contour
 
 from .args import get_args
+from .graph import Graph
 
 
 def read_image_in_gray_scale(image_path: Path) -> np.ndarray:
@@ -53,4 +55,19 @@ def extract_ink_mask(image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return mask, edges
 
 
-__all__ = ["extract_ink_mask", "read_image_in_gray_scale"]
+def graph_to_contours(graph: Graph) -> list[Contour]:
+    contours = []
+    for edge in graph.edges:
+        points = []
+        for x, y in edge.pixels:
+            point = (float(x), float(y))
+            if not points or point != points[-1]:
+                points.append(point)
+        closed = edge.start.pos == edge.end.pos
+        if closed and len(points) > 1 and points[0] == points[-1]:
+            points.pop()
+        contours.append(Contour(tuple(points), closed))
+    return contours
+
+
+__all__ = ["extract_ink_mask", "graph_to_contours", "read_image_in_gray_scale"]

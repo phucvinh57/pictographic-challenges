@@ -1,16 +1,17 @@
 from pathlib import Path
 
 from common import debug
+from common.vectorization import fit_contour, process_contour
 
 from .args import get_args
 from .constants import IMAGE_SUFFIXES
-from .contour import extract_contours, process_contour, read_image_in_gray_scale
-from .curve_fitting import fit_closed_contour
+from .contour import extract_contours, read_image_in_gray_scale
 from .svg import draw_bezier_svg
 
 
 def convert_to_svg(image_path: Path) -> None:
-    output_dir = get_args("output_dir")
+    args = get_args()
+    output_dir = args.output_dir
     debug.begin(image_path.name)
     with debug.timed("read image"):
         image = read_image_in_gray_scale(image_path)
@@ -21,9 +22,9 @@ def convert_to_svg(image_path: Path) -> None:
     curves_list = []
     for c in contours:
         with debug.timed("process contours"):
-            simplified_contour, straight_flags = process_contour(c)
+            processed = process_contour(c, args.vectorization)
         with debug.timed("fit curves"):
-            curves_list.append(fit_closed_contour(simplified_contour, straight_flags))
+            curves_list.append(fit_contour(processed, args.vectorization))
     shape = (int(image.shape[0]), int(image.shape[1]))
     with debug.timed("draw svg"):
         svg = draw_bezier_svg(shape, curves_list)

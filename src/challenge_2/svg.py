@@ -1,44 +1,43 @@
 from __future__ import annotations
 
-import numpy as np
+from collections.abc import Sequence
 
-from .smoothing import SmoothedEdge
+from common.vectorization import AxisPoint, BezierCurve
 
 
 def _number(value: float) -> str:
     return f"{value:.2f}".rstrip("0").rstrip(".")
 
 
-def _point(point: np.ndarray) -> str:
-    return f"{_number(float(point[0]))},{_number(float(point[1]))}"
+def _point(point: AxisPoint) -> str:
+    return f"{_number(point[0])},{_number(point[1])}"
 
 
-def _edge_path(edge: SmoothedEdge) -> str:
-    if not edge.curves:
-        if len(edge.samples) == 0:
-            return ""
-        return f"M{_point(edge.samples[0])} l0,0"
-
-    commands = [f"M{_point(edge.curves[0].start)}"]
-    for curve in edge.curves:
+def _contour_path(curves: Sequence[BezierCurve]) -> str:
+    if not curves:
+        return ""
+    commands = [f"M{_point(curves[0].start)}"]
+    for curve in curves:
         commands.append(
             "C"
             f"{_point(curve.first_control)} "
             f"{_point(curve.second_control)} "
             f"{_point(curve.end)}"
         )
-    if np.allclose(edge.curves[-1].end, edge.curves[0].start):
+    if curves[-1].end == curves[0].start:
         commands.append("Z")
     return " ".join(commands)
 
 
 def draw_svg(
     shape: tuple[int, int],
-    edges: list[SmoothedEdge],
+    contours: Sequence[Sequence[BezierCurve]],
     stroke_width: float,
 ) -> str:
     height, width = shape
-    path_data = " ".join(path for edge in edges if (path := _edge_path(edge)))
+    path_data = " ".join(
+        path for curves in contours if (path := _contour_path(curves))
+    )
     return (
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" '
         f'height="{height}" viewBox="0 0 {width} {height}">'

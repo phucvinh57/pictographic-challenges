@@ -14,6 +14,10 @@ Each image goes through these processing stages:
    too large, split at the worst point and fit both halves, recursing until it fits.
    Tangents at the cuts are shared, so neighbouring curves join smoothly.
 
+The contour processing and curve fitting stages live in `common.vectorization`.
+Challenge 1 supplies closed boundary contours; challenge 2 uses the same code for
+open and closed skeleton contours.
+
 Then write the whole thing as one `<path>` with `fill-rule="evenodd"`, so holes
 (inner rings) punch through outer rings for free.
 

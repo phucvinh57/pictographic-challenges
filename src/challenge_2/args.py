@@ -6,6 +6,11 @@ from pathlib import Path
 from typing import Literal, overload
 
 from common.validation import non_negative_int, positive_float, positive_int, ratio
+from common.vectorization import (
+    VectorizationSettings,
+    add_vectorization_arguments,
+    remove_vectorization_arguments,
+)
 
 from .constants import (
     CANNY_HIGH,
@@ -13,7 +18,6 @@ from .constants import (
     IN_DIR,
     MIN_AREA,
     OUT_DIR,
-    SAMPLE_SPACING,
     STROKE_WIDTH,
     TRANSITION_DELTA,
     TRANSITION_FLATNESS,
@@ -29,7 +33,7 @@ class Args:
     min_area: int
     transition_delta: float
     transition_flatness: float
-    sample_spacing: int
+    vectorization: VectorizationSettings
     stroke_width: float
     debug: bool
 
@@ -60,31 +64,30 @@ class Args:
             help="Maximum plateau slope relative to the incoming slope",
         )
 
-        smoothing = parser.add_argument_group("Bézier smoothing")
-        smoothing.add_argument(
-            "--sample-spacing",
-            type=positive_int,
-            default=SAMPLE_SPACING,
-            help="Arc distance in pixels between points sampled before smoothing",
-        )
-        smoothing.add_argument(
+        add_vectorization_arguments(parser)
+
+        output = parser.add_argument_group("svg output")
+        output.add_argument(
             "--stroke-width",
             type=positive_float,
             default=STROKE_WIDTH,
             help="Fixed SVG edge width in pixels",
         )
-
         parser.add_argument(
             "-d", "--debug", action="store_true", help="Enable debug mode"
         )
-        args = cls(**vars(parser.parse_args(argv)))
-        if args.canny_high <= args.canny_low:
+
+        namespace = parser.parse_args(argv)
+        if namespace.canny_high <= namespace.canny_low:
             parser.error("--canny-high must be greater than --canny-low")
-        return args
+        vectorization = VectorizationSettings.from_namespace(namespace)
+        values = vars(namespace)
+        remove_vectorization_arguments(values)
+        return cls(vectorization=vectorization, **values)
 
 
 PathField = Literal["input_dir", "output_dir"]
-IntField = Literal["canny_low", "canny_high", "min_area", "sample_spacing"]
+IntField = Literal["canny_low", "canny_high", "min_area"]
 FloatField = Literal["transition_delta", "transition_flatness", "stroke_width"]
 BoolField = Literal["debug"]
 

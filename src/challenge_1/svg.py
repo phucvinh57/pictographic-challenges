@@ -3,9 +3,9 @@ from __future__ import annotations
 from math import hypot
 
 from common import debug
+from common.vectorization import AxisPoint, BezierCurve
 
 from .args import get_args
-from .geometry import AxisPoint, BezierCurve
 
 
 def _number(value: float) -> str:

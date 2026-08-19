@@ -13,9 +13,10 @@ For each image, the pipeline:
 5. removes each old junction, matches transition branches by their local
    direction, and rewrites the graph with merged edges or a replacement
    junction where unmatched branch tangents meet;
-6. samples each rewritten edge at uniform arc-length intervals, then fits a
-   cubic Bézier spline through those samples. Open-edge endpoints stay fixed and
-   loops use cyclic tangents so their joins remain smooth.
+6. converts each rewritten graph edge into a contour, simplifies it, detects
+   corners and straight runs, then recursively fits cubic Bézier curves with the
+   shared `common.vectorization` pipeline. Open-edge endpoints stay fixed and
+   self-loop edges use cyclic tangents.
 
 The output is a white SVG whose graph edges are cubic Bézier paths drawn with a
 fixed black stroke.
@@ -29,9 +30,10 @@ uv run challenge_2
 Use `uv run challenge_2 --help` to change the input/output directories, Canny
 thresholds, or minimum retained component area.
 
-Use `--sample-spacing` to change the distance between points sampled before
-Bézier smoothing (default `8` pixels). A larger value produces fewer, softer
-curve spans.
+Challenge 2 exposes the same contour and curve-fitting settings as challenge 1.
+The main controls are `--simplify-ratio`, the `--break-*` and `--straight-*`
+settings, `--corner-angle-threshold`, `--fit-ratio`, and
+`--tangent-span-ratio`.
 
 Use `--stroke-width` to set the fixed width of every SVG edge (default `64`
 pixel). Rounded caps and joins keep endpoints and reconstructed junctions
@@ -47,8 +49,8 @@ Transition sensitivity can be tuned with:
 Pass `--debug` to also write two diagnostic images for each input:
 
 - `<name>_debug.png` shows the original medial axis in light grey, the rewritten
-  graph in dark grey, the smoothed graph in black, sampled points in purple, old
-  junctions in blue, new junctions in green, and detected radius transitions in
-  red;
+  graph in dark grey, the fitted contours in black, processed contour points in
+  purple, old junctions in blue, new junctions in green, and detected radius
+  transitions in red;
 - `<name>_radius_debug.png` plots every edge's raw, median-filtered, and fitted
   radius profile with its selected transition points.

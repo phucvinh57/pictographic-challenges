@@ -52,5 +52,6 @@ uv run challenge_2
 ```
 
 This extracts glyph borders with Canny, thins the enclosed ink to a skeleton,
-then samples and smooths its graph edges with cubic Bézier curves. Output SVGs
-are written to `./output/challenge_2`.
+rewrites its graph into contours, then processes and fits them with the same
+shared cubic Bézier pipeline as challenge 1. Output SVGs are written to
+`./output/challenge_2`.

@@ -1,17 +1,24 @@
+from itertools import pairwise
+from math import ceil
 from pathlib import Path
 
 import cv2
 import numpy as np
 
 from common import debug
+from common.vectorization import (
+    BezierCurve,
+    ProcessedContour,
+    fit_contour,
+    process_contour,
+)
 
 from .args import get_args
 from .constants import IMAGE_SUFFIXES
-from .contour import extract_ink_mask, read_image_in_gray_scale
+from .contour import extract_ink_mask, graph_to_contours, read_image_in_gray_scale
 from .graph import Graph, NodeType, RadiusProfile, build_graph
 from .junction import JunctionRewriteReport, rewrite_junctions
 from .skeleton import MedialAxis, skeletonize
-from .smoothing import SmoothedEdge, smooth_edge
 from .svg import draw_svg
 
 _EDGE_GREY = (225, 225, 225)
@@ -24,8 +31,8 @@ _ENDPOINT_ORANGE = (20, 145, 220)
 _TRANSITION_RED = (30, 30, 230)
 _NEW_JUNCTION_GREEN = (45, 150, 45)
 _FINAL_AXIS_GREY = (70, 70, 70)
-_SMOOTHED_BLACK = (20, 20, 20)
-_SAMPLE_PURPLE = (180, 70, 180)
+_FITTED_BLACK = (20, 20, 20)
+_CONTOUR_PURPLE = (180, 70, 180)
 
 
 def _draw_marker(
@@ -38,12 +45,41 @@ def _draw_marker(
     cv2.circle(canvas, position, radius, color, -1, cv2.LINE_AA)
 
 
+def _flatten_curves(curves: list[BezierCurve], spacing: float = 0.5) -> np.ndarray:
+    flattened: list[np.ndarray] = []
+    for curve_index, curve in enumerate(curves):
+        controls = np.asarray(
+            (
+                curve.start,
+                curve.first_control,
+                curve.second_control,
+                curve.end,
+            ),
+            dtype=np.float64,
+        )
+        control_length = sum(
+            np.linalg.norm(second - first) for first, second in pairwise(controls)
+        )
+        sample_count = max(2, ceil(float(control_length) / spacing) + 1)
+        parameters = np.linspace(0.0, 1.0, sample_count)
+        remaining = 1.0 - parameters
+        points = (
+            remaining[:, None] ** 3 * controls[0]
+            + 3 * remaining[:, None] ** 2 * parameters[:, None] * controls[1]
+            + 3 * remaining[:, None] * parameters[:, None] ** 2 * controls[2]
+            + parameters[:, None] ** 3 * controls[3]
+        )
+        flattened.extend(points[curve_index > 0 :])
+    return np.asarray(flattened, dtype=np.float64)
+
+
 def write_debug_image(
     medial: MedialAxis,
     edges: np.ndarray,
     graph: Graph,
     report: JunctionRewriteReport,
-    smoothed_edges: list[SmoothedEdge],
+    contours: list[ProcessedContour],
+    curves_list: list[list[BezierCurve]],
     output_path: Path,
 ) -> None:
     overlay = np.full((*medial.shape, 3), 255, dtype=np.uint8)
@@ -54,11 +90,19 @@ def write_debug_image(
         pixels = np.asarray(edge.pixels, dtype=np.int32)
         cv2.polylines(overlay, [pixels], False, _FINAL_AXIS_GREY, 1, cv2.LINE_8)
 
-    for edge in smoothed_edges:
-        pixels = np.round(edge.polyline).astype(np.int32)
-        cv2.polylines(overlay, [pixels], False, _SMOOTHED_BLACK, 1, cv2.LINE_AA)
-        for point in np.round(edge.samples).astype(np.int32):
-            cv2.circle(overlay, (int(point[0]), int(point[1])), 2, _SAMPLE_PURPLE, -1)
+    for curves in curves_list:
+        pixels = np.round(_flatten_curves(curves)).astype(np.int32)
+        if len(pixels) > 0:
+            cv2.polylines(overlay, [pixels], False, _FITTED_BLACK, 1, cv2.LINE_AA)
+    for contour in contours:
+        for point in np.round(np.asarray(contour.points)).astype(np.int32):
+            cv2.circle(
+                overlay,
+                (int(point[0]), int(point[1])),
+                2,
+                _CONTOUR_PURPLE,
+                -1,
+            )
 
     for rewrite in report.junctions:
         for old_position in rewrite.old_positions:
@@ -315,13 +359,18 @@ def convert_to_skeleton(image_path: Path) -> None:
     transition_count = len(graph.transitions)
     with debug.timed("rewrite junctions"):
         report = rewrite_junctions(graph)
-    with debug.timed("sample and smooth edges"):
-        smoothed_edges = [
-            smooth_edge(np.asarray(edge.pixels, dtype=np.float64), args.sample_spacing)
-            for edge in graph.edges
+    with debug.timed("convert graph to contours"):
+        contours = graph_to_contours(graph)
+    with debug.timed("process contours"):
+        processed_contours = [
+            process_contour(contour, args.vectorization) for contour in contours
+        ]
+    with debug.timed("fit curves"):
+        curves_list = [
+            fit_contour(contour, args.vectorization) for contour in processed_contours
         ]
     with debug.timed("draw SVG"):
-        svg = draw_svg(medial_axis.shape, smoothed_edges, args.stroke_width)
+        svg = draw_svg(medial_axis.shape, curves_list, args.stroke_width)
     output_path = args.output_dir / f"{image_path.stem}.svg"
     with debug.timed("write SVG"):
         output_path.write_text(svg)
@@ -331,14 +380,18 @@ def convert_to_skeleton(image_path: Path) -> None:
             edges,
             graph,
             report,
-            smoothed_edges,
+            processed_contours,
+            curves_list,
             args.output_dir / f"{image_path.stem}_debug.png",
         )
     debug.count("svg bytes", len(svg))
     debug.count("transitions", transition_count)
     debug.count("rewritten junctions", len(report.junctions))
-    debug.count("sampled points", sum(len(edge.samples) for edge in smoothed_edges))
-    debug.count("Bézier curves", sum(len(edge.curves) for edge in smoothed_edges))
+    debug.count(
+        "processed contour points",
+        sum(len(contour.points) for contour in processed_contours),
+    )
+    debug.count("Bézier curves", sum(len(curves) for curves in curves_list))
     debug.report()
 
 

@@ -1,33 +1,25 @@
-from __future__ import annotations
-
 from collections.abc import Sequence
-from dataclasses import dataclass
 from itertools import pairwise
 from math import atan2, ceil, degrees, hypot
 
-AxisPoint = tuple[float, float]
-Contour = list[AxisPoint]
+from .types import AxisPoint, BezierCurve
 
 
 def distance(first: AxisPoint, second: AxisPoint) -> float:
-    """|AB|"""
     return hypot(second[0] - first[0], second[1] - first[1])
 
 
-def perimeter(points: Sequence[AxisPoint]) -> float:
-    """Total length of the closed ring through `points`."""
+def path_length(points: Sequence[AxisPoint], closed: bool) -> float:
     return sum(distance(first, second) for first, second in pairwise(points)) + (
-        distance(points[-1], points[0]) if len(points) > 1 else 0.0
+        distance(points[-1], points[0]) if closed and len(points) > 1 else 0.0
     )
 
 
 def scaled(ratio: float, floor: float, scale: float) -> float:
-    """A threshold as a fraction of a shape's size, never below a pixel floor."""
     return max(floor, ratio * scale)
 
 
 def cross_product(a: AxisPoint, b: AxisPoint, c: AxisPoint) -> float:
-    """AB x AC"""
     return (b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])
 
 
@@ -37,7 +29,6 @@ def unit(vector: AxisPoint) -> AxisPoint:
 
 
 def signed_angle(a: AxisPoint, b: AxisPoint, c: AxisPoint) -> float:
-    """Signed angle in degrees between the vectors AB and BC."""
     ab = (b[0] - a[0], b[1] - a[1])
     bc = (c[0] - b[0], c[1] - b[1])
     return degrees(
@@ -48,18 +39,7 @@ def signed_angle(a: AxisPoint, b: AxisPoint, c: AxisPoint) -> float:
     )
 
 
-@dataclass(frozen=True)
-class BezierCurve:
-    """A cubic Bézier span represented by its four control points."""
-
-    start: AxisPoint
-    first_control: AxisPoint
-    second_control: AxisPoint
-    end: AxisPoint
-
-
 def offset(point: AxisPoint, line: tuple[AxisPoint, AxisPoint]) -> float:
-    """Perpendicular distance from a point to the line through A and B."""
     start, end = line
     length = distance(start, end)
     if length == 0:
@@ -68,7 +48,6 @@ def offset(point: AxisPoint, line: tuple[AxisPoint, AxisPoint]) -> float:
 
 
 def densify(points: Sequence[AxisPoint], spacing: float) -> list[AxisPoint]:
-    """Resample a polyline so no segment is longer than `spacing`."""
     dense = [points[0]]
     for start, end in pairwise(points):
         length = distance(start, end)
@@ -84,7 +63,6 @@ def densify(points: Sequence[AxisPoint], spacing: float) -> list[AxisPoint]:
 
 
 def chord_parameters(points: Sequence[AxisPoint]) -> list[float]:
-    """Assign each point a 0 to 1 parameter proportional to arc length."""
     values = [0.0]
     for first, second in pairwise(points):
         values.append(values[-1] + distance(first, second))
@@ -99,7 +77,6 @@ def generate_bezier(
     start_tangent: AxisPoint,
     end_tangent: AxisPoint,
 ) -> BezierCurve:
-    """Least-squares fit one cubic to points, with both tangents fixed."""
     start, end = points[0], points[-1]
     c00 = c01 = c11 = x0 = x1 = 0.0
     for point, parameter in zip(points, parameters):
@@ -149,16 +126,13 @@ def fit_error(
     parameters: Sequence[float],
     curve: BezierCurve,
 ) -> tuple[float, int]:
-    """Worst squared deviation from the curve, and where it happens."""
-    (start_x, start_y) = curve.start
-    (first_x, first_y) = curve.first_control
-    (second_x, second_y) = curve.second_control
-    (end_x, end_y) = curve.end
+    start_x, start_y = curve.start
+    first_x, first_y = curve.first_control
+    second_x, second_y = curve.second_control
+    end_x, end_y = curve.end
     maximum = 0.0
     split = len(points) // 2
     for index in range(1, len(points) - 1):
-        # The cubic evaluated at this point's parameter, inlined so the control
-        # points are unpacked once rather than on every sample.
         parameter = parameters[index]
         remaining = 1 - parameter
         start_weight = remaining**3
@@ -186,7 +160,6 @@ def fit_error(
 
 
 def line_curve(start: AxisPoint, end: AxisPoint) -> BezierCurve:
-    """A cubic whose controls sit on the straight line from A to B."""
     return BezierCurve(
         start,
         (start[0] + (end[0] - start[0]) / 3, start[1] + (end[1] - start[1]) / 3),
