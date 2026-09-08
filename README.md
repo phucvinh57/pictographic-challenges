@@ -1,17 +1,15 @@
-# pictographic
+# Pictographic challenges
 
-Binarizes images and traces their ink boundaries as smooth vector contours.
+For the detail of challenges, please visit https://pictographic.ai/career.
 
-Each input image produces a compact filled SVG.
-
-For a stage-by-stage explanation of the outline vectorizer, see:
+Here is the explanation of each challenges
 - [Challenge 1: raster outline to SVG](src/challenge_1/README.md).
-
+- Challenge 2: extract centerline. It has not done yet.
 ## Presequisite
 
 ### Git LFS
 
-Images are stored in Git LFS. Please install `git-lfs` to pull them into your local repository.
+Test images are stored in Git LFS. Please install `git-lfs` to pull them into your local repository.
 
 
 ### Set up project
